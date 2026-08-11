@@ -309,20 +309,21 @@ function Set-ActivityTextRuns([object]$Summary) {
     $badgeText.Inlines.Clear()
     if (-not $Summary) { return }
     $dot = [string][char]0x25CF
+    $thinSpace = [string][char]0x2009
 
     $prefix = [System.Windows.Documents.Run]::new('Codex  ')
     $prefix.Foreground = $overlayForeground
     [void]$badgeText.Inlines.Add($prefix)
 
-    $idleRun = [System.Windows.Documents.Run]::new("$dot$([int]$Summary.idle)   ")
+    $idleRun = [System.Windows.Documents.Run]::new("$dot$thinSpace$([int]$Summary.idle)   ")
     $idleRun.Foreground = $idleForeground
     [void]$badgeText.Inlines.Add($idleRun)
 
-    $workingRun = [System.Windows.Documents.Run]::new("$dot$([int]$Summary.working)   ")
+    $workingRun = [System.Windows.Documents.Run]::new("$dot$thinSpace$([int]$Summary.working)   ")
     $workingRun.Foreground = $workingForeground
     [void]$badgeText.Inlines.Add($workingRun)
 
-    $finishedRun = [System.Windows.Documents.Run]::new("$dot$([int]$Summary.finished)")
+    $finishedRun = [System.Windows.Documents.Run]::new("$dot$thinSpace$([int]$Summary.finished)")
     $finishedRun.Foreground = $finishedForeground
     [void]$badgeText.Inlines.Add($finishedRun)
 }
