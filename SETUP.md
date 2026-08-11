@@ -83,6 +83,56 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 You do not need to permanently weaken the machine execution policy; the supervisor launches helpers with `-ExecutionPolicy Bypass`.
 
+## Automated setup path
+
+This repo includes a conservative setup script for new machines:
+
+```powershell
+.\scripts\Install-CodexGroupyEnvironment.ps1
+```
+
+With no flags, it is a dry run. It detects Groupy, prints the current vs desired settings, and does not write anything.
+
+To back up your current Groupy settings, apply the known-good Groupy values, install the Windows logon Scheduled Task, and start the helper supervisor:
+
+```powershell
+.\scripts\Install-CodexGroupyEnvironment.ps1 -Apply
+```
+
+Backups are written to:
+
+```text
+backups\groupy-settings\
+```
+
+That folder is intentionally ignored by Git because registry exports are local machine state.
+
+To create only a backup:
+
+```powershell
+.\scripts\Install-CodexGroupyEnvironment.ps1 -BackupOnly
+```
+
+To restore a backup:
+
+```powershell
+.\scripts\Install-CodexGroupyEnvironment.ps1 -RestoreBackup .\backups\groupy-settings\GroupySettings-YYYYMMDD-HHMMSS.reg
+```
+
+If Groupy does not pick up the new settings immediately, sign out/in, reboot, or explicitly ask the script to restart the Groupy UI/control process:
+
+```powershell
+.\scripts\Install-CodexGroupyEnvironment.ps1 -Apply -RestartGroupy
+```
+
+For AI-assisted setup, this repo also includes an agent skill at:
+
+```text
+.agents\skills\setup-codex-groupy-vscode-tabs\SKILL.md
+```
+
+An agent can use that skill as the full setup/validation playbook.
+
 ## Configure Groupy
 
 Open **Stardock Groupy 2 Configuration**.
@@ -536,6 +586,7 @@ Then inspect the relevant log in `work\`.
 Runtime files live in `scripts\`:
 
 ```text
+scripts\Install-CodexGroupyEnvironment.ps1
 scripts\CodexGroupySupervisor.ps1
 scripts\Start-CodexGroupyTools.ps1
 scripts\Stop-CodexGroupyTools.ps1

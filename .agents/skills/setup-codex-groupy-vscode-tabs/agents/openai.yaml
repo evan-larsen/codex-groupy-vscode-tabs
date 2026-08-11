@@ -1,0 +1,7 @@
+interface:
+  display_name: "Setup Codex Groupy Tabs"
+  short_description: "Install the Codex Groupy tab workflow."
+  default_prompt: "Use $setup-codex-groupy-vscode-tabs to set up the Codex Groupy VS Code tabs workflow on this Windows machine."
+
+policy:
+  allow_implicit_invocation: true

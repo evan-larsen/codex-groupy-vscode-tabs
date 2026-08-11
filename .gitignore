@@ -5,6 +5,9 @@ work/*.tmp
 work/*.pid
 work/*.json
 
+# Local machine backups created by setup automation
+backups/
+
 # PowerShell / Windows noise
 *.ps1xml
 *.pssc
