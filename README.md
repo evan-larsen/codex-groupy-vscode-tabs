@@ -2,6 +2,8 @@
 
 This is a lightweight, local PowerShell helper for the specific workflow of one Codex conversation per VS Code window, grouped into tabs by Groupy 2.
 
+For a full new-machine setup guide, including Groupy settings, startup task setup, colors, hotkeys, and troubleshooting, see [`SETUP.md`](SETUP.md).
+
 ## Daily runtime: one supervisor
 
 The normal setup is owned by `CodexGroupySupervisor.ps1`. It keeps the title watcher, Codex chat rename
