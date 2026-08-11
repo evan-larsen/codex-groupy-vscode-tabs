@@ -1,0 +1,34 @@
+# Active runtime logs/state
+work/*.log
+work/*.err.log
+work/*.tmp
+work/*.pid
+
+# PowerShell / Windows noise
+*.ps1xml
+*.pssc
+*.psd1~
+Thumbs.db
+Desktop.ini
+
+# Editor / local machine state
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Rebuildable Python/cache artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Native build scratch files
+*.obj
+*.exp
+*.lib
+*.dll
+
+# Heavy local evidence preserved under archive, but not useful in GitHub history.
+archive/screenshots-and-traces/**
+archive/generated-native/**
+!archive/generated-native/*.cpp
