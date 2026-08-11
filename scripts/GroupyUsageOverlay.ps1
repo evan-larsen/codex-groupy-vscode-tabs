@@ -296,7 +296,8 @@ function Get-CodexContextLabel([IntPtr]$Handle, [switch]$AllowUiAutomation) {
     $usedTokens = [double]$latest.last_token_usage.total_tokens
     if ($windowTokens -le 0 -or $usedTokens -lt 0) { return $null }
     $percentFull = [Math]::Max(0, [Math]::Min(100, [Math]::Round(100 * ($usedTokens / $windowTokens))))
-    $entry.Label = "Context $percentFull%"
+    $percentLeft = [Math]::Max(0, [Math]::Min(100, 100 - $percentFull))
+    $entry.Label = "Context $percentLeft%"
     return $entry.Label
 }
 

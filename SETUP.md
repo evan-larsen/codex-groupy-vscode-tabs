@@ -297,7 +297,7 @@ Text color: #dcdcdc   RGB(220, 220, 220)
 Expected text resembles:
 
 ```text
-Context 22%  |  Weekly 91% · 6d
+Context 78%  |  Weekly 91% · 6d
 ```
 
 The badge is click-through and hides when the foreground window is not a grouped VS Code window.
