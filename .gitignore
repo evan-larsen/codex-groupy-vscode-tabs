@@ -3,6 +3,7 @@ work/*.log
 work/*.err.log
 work/*.tmp
 work/*.pid
+work/*.json
 
 # PowerShell / Windows noise
 *.ps1xml

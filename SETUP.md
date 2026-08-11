@@ -297,10 +297,12 @@ Text color: #dcdcdc   RGB(220, 220, 220)
 Expected text resembles:
 
 ```text
-Context 78% left  |  Weekly 91% · 6d
+Codex ○ 3  ● 1  ● 2      Context 78% left  |  Weekly 91% · 6d
 ```
 
-The badge is click-through and hides when the foreground window is not a grouped VS Code window.
+The white count is idle/resolved Codex tabs, the yellow count is running turns, and the green count is
+unread completed turns for the active Groupy strip. The badge is click-through and hides when the
+foreground window is not a grouped VS Code window.
 
 ## Hotkeys
 

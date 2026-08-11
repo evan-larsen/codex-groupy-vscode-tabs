@@ -16,6 +16,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Path $PSScriptRoot -Parent
 
 if ([Threading.Thread]::CurrentThread.ApartmentState -ne 'STA') {
     throw 'Run this helper with Windows PowerShell (powershell.exe), which uses STA for the transparent overlay window.'
@@ -98,7 +99,7 @@ namespace CodexGroupy {
 }
 
 $window = [System.Windows.Window]::new()
-$window.Width = 290
+$window.Width = 430
 $window.Height = 29
 $window.WindowStyle = 'None'
 $window.ResizeMode = 'NoResize'
@@ -112,17 +113,21 @@ $window.Focusable = $false
 $panel = [System.Windows.Controls.Grid]::new()
 $panel.ColumnDefinitions.Add([System.Windows.Controls.ColumnDefinition]::new())
 $panel.ColumnDefinitions.Add([System.Windows.Controls.ColumnDefinition]::new())
+$panel.ColumnDefinitions.Add([System.Windows.Controls.ColumnDefinition]::new())
 $panel.ColumnDefinitions[0].Width = [System.Windows.GridLength]::Auto
-$panel.ColumnDefinitions[1].Width = [System.Windows.GridLength]::new(1, [System.Windows.GridUnitType]::Star)
+$panel.ColumnDefinitions[1].Width = [System.Windows.GridLength]::new(22)
+$panel.ColumnDefinitions[2].Width = [System.Windows.GridLength]::new(1, [System.Windows.GridUnitType]::Star)
 $overlayForeground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromRgb(220, 220, 220))
+$idleForeground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromRgb(245, 245, 245))
+$workingForeground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromRgb(255, 205, 20))
+$finishedForeground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromRgb(67, 201, 109))
 
-$contextText = [System.Windows.Controls.TextBlock]::new()
-$contextText.FontFamily = [System.Windows.Media.FontFamily]::new('Segoe UI')
-$contextText.FontSize = 12
-$contextText.FontWeight = 'Normal'
-$contextText.Foreground = $overlayForeground
-$contextText.VerticalAlignment = 'Center'
-$contextText.HorizontalAlignment = 'Left'
+$activityText = [System.Windows.Controls.TextBlock]::new()
+$activityText.FontFamily = [System.Windows.Media.FontFamily]::new('Segoe UI')
+$activityText.FontSize = 12
+$activityText.FontWeight = 'Normal'
+$activityText.VerticalAlignment = 'Center'
+$activityText.HorizontalAlignment = 'Left'
 
 $usageText = [System.Windows.Controls.TextBlock]::new()
 $usageText.Text = 'loading...'
@@ -134,9 +139,9 @@ $usageText.VerticalAlignment = 'Center'
 $usageText.HorizontalAlignment = 'Right'
 $usageText.TextAlignment = 'Right'
 
-[System.Windows.Controls.Grid]::SetColumn($contextText, 0)
-[System.Windows.Controls.Grid]::SetColumn($usageText, 1)
-[void]$panel.Children.Add($contextText)
+[System.Windows.Controls.Grid]::SetColumn($activityText, 0)
+[System.Windows.Controls.Grid]::SetColumn($usageText, 2)
+[void]$panel.Children.Add($activityText)
 [void]$panel.Children.Add($usageText)
 $window.Content = $panel
 
@@ -149,10 +154,12 @@ $window.Add_SourceInitialized({
 })
 
 $usageScript = Join-Path $PSScriptRoot 'Get-CodexUsage.ps1'
+$activitySummaryPath = Join-Path $repoRoot 'work\ActivityDotsSummary.json'
 $sessionIndexPath = Join-Path $env:USERPROFILE '.codex\session_index.jsonl'
 $sessionsRoot = Join-Path $env:USERPROFILE '.codex\sessions'
 $script:usageLabel = 'loading...'
 $script:contextLabel = $null
+$script:activityLabel = $null
 $script:contextCache = @{}
 
 function ConvertTo-CodexTitleKey([string]$Title) {
@@ -231,6 +238,43 @@ function Get-CodexContextCacheEntry([IntPtr]$Handle) {
     return $script:contextCache[$key]
 }
 
+function Set-ActivityTextRuns([object]$Summary) {
+    $activityText.Inlines.Clear()
+    if (-not $Summary) { return }
+
+    $prefix = [System.Windows.Documents.Run]::new('Codex  ')
+    $prefix.Foreground = $overlayForeground
+    [void]$activityText.Inlines.Add($prefix)
+
+    $idleRun = [System.Windows.Documents.Run]::new("○ $([int]$Summary.idle)  ")
+    $idleRun.Foreground = $idleForeground
+    [void]$activityText.Inlines.Add($idleRun)
+
+    $workingRun = [System.Windows.Documents.Run]::new("● $([int]$Summary.working)  ")
+    $workingRun.Foreground = $workingForeground
+    [void]$activityText.Inlines.Add($workingRun)
+
+    $finishedRun = [System.Windows.Documents.Run]::new("● $([int]$Summary.finished)")
+    $finishedRun.Foreground = $finishedForeground
+    [void]$activityText.Inlines.Add($finishedRun)
+}
+
+function Get-ActivitySummaryForActiveStrip([IntPtr]$Foreground, [IntPtr]$Strip) {
+    if ($Strip -eq [IntPtr]::Zero -or -not (Test-Path -LiteralPath $activitySummaryPath)) { return $null }
+    try {
+        $item = Get-Item -LiteralPath $activitySummaryPath -ErrorAction Stop
+        if (((Get-Date) - $item.LastWriteTime).TotalSeconds -gt 10) { return $null }
+        $summary = Get-Content -LiteralPath $activitySummaryPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if (-not $summary.activeStrip) { return $null }
+        $stripKey = $Strip.ToInt64().ToString('X')
+        if ([string]$summary.activeStrip.key -ne $stripKey) { return $null }
+        return $summary.activeStrip
+    }
+    catch {
+        return $null
+    }
+}
+
 function Get-CachedCodexContextLabel([IntPtr]$Handle) {
     $key = $Handle.ToInt64().ToString('X')
     if ($script:contextCache.ContainsKey($key)) { return $script:contextCache[$key].Label }
@@ -302,7 +346,7 @@ function Get-CodexContextLabel([IntPtr]$Handle, [switch]$AllowUiAutomation) {
 }
 
 function Update-OverlayText {
-    $contextText.Text = ''
+    Set-ActivityTextRuns $script:activityLabel
     $usageText.Text = if ($script:contextLabel) { "$script:contextLabel  |  Weekly $script:usageLabel" } else { "Weekly $script:usageLabel" }
 }
 
@@ -336,9 +380,11 @@ function Update-ContextText {
     $strip = [CodexGroupy.UsageOverlayNativeV5]::GetProp($foreground, 'GP_LINK')
     if ($strip -eq [IntPtr]::Zero -or -not [CodexGroupy.UsageOverlayNativeV5]::IsCodeWindow($foreground)) {
         $script:contextLabel = $null
+        $script:activityLabel = $null
     }
     else {
         $script:contextLabel = Get-CodexContextLabel $foreground -AllowUiAutomation
+        $script:activityLabel = Get-ActivitySummaryForActiveStrip $foreground $strip
     }
     Update-OverlayText
 }
@@ -424,6 +470,12 @@ function Update-ContextOnForegroundChange {
     $strip = [CodexGroupy.UsageOverlayNativeV5]::GetProp($foreground, 'GP_LINK')
     $script:contextLabel = if ($strip -ne [IntPtr]::Zero -and [CodexGroupy.UsageOverlayNativeV5]::IsCodeWindow($foreground)) {
         Get-CachedCodexContextLabel $foreground
+    }
+    else {
+        $null
+    }
+    $script:activityLabel = if ($strip -ne [IntPtr]::Zero -and [CodexGroupy.UsageOverlayNativeV5]::IsCodeWindow($foreground)) {
+        Get-ActivitySummaryForActiveStrip $foreground $strip
     }
     else {
         $null

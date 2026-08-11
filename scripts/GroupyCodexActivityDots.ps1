@@ -350,6 +350,7 @@ $script:lastFullInspectorDiscoveryAt = [DateTime]::MinValue
 $repoRoot = Split-Path -Path $PSScriptRoot -Parent
 $script:activityDiagnosticsPath = Join-Path $repoRoot 'work\ActivityDotsRuntime.log'
 $script:inspectorCachePath = Join-Path $repoRoot 'work\CodexInspectorUrl.txt'
+$script:activitySummaryPath = Join-Path $repoRoot 'work\ActivityDotsSummary.json'
 $script:lastDiagnosticsSignature = $null
 $script:lastBridgeDiscoverySignature = $null
 $script:lastHeartbeatAt = [DateTime]::MinValue
@@ -373,6 +374,8 @@ $script:lastSessionWatcherDiagnostic = $null
 $script:lastMoveActive = $false
 $script:workingPulseIndex = 0
 $script:workingPulseOpacities = @(0.56, 0.58, 0.61, 0.65, 0.70, 0.76, 0.82, 0.88, 0.93, 0.97, 0.995, 1.0, 0.995, 0.97, 0.93, 0.88, 0.82, 0.76, 0.70, 0.65, 0.61, 0.58)
+$script:activitySummaryByStrip = @{}
+$script:lastActivitySummaryJson = ''
 
 function Write-ActivityDiagnostic([string]$Message) {
     try {
@@ -381,6 +384,52 @@ function Write-ActivityDiagnostic([string]$Message) {
     }
     catch {
         # Diagnostics must never affect Groupy/VS Code behavior.
+    }
+}
+
+function Publish-ActivitySummary {
+    $foreground = [CodexGroupy.ActivityDotsNativeV1]::GetForegroundWindow()
+    $activeStrip = if ([CodexGroupy.ActivityDotsNativeV1]::IsCodeWindow($foreground)) {
+        [CodexGroupy.ActivityDotsNativeV1]::GetProp($foreground, 'GP_LINK')
+    } else {
+        [IntPtr]::Zero
+    }
+    $activeStripKey = if ($activeStrip -eq [IntPtr]::Zero) { '' } else { $activeStrip.ToInt64().ToString('X') }
+    $active = if ($activeStripKey -and $script:activitySummaryByStrip.ContainsKey($activeStripKey)) {
+        $script:activitySummaryByStrip[$activeStripKey]
+    } else {
+        @{ idle = 0; working = 0; finished = 0 }
+    }
+    $all = @{ idle = 0; working = 0; finished = 0 }
+    foreach ($summary in @($script:activitySummaryByStrip.Values)) {
+        $all.idle += [int]$summary.idle
+        $all.working += [int]$summary.working
+        $all.finished += [int]$summary.finished
+    }
+    $payload = [ordered]@{
+        updatedAt = [DateTimeOffset]::UtcNow.ToString('o')
+        activeStrip = [ordered]@{
+            key = $activeStripKey
+            idle = [int]$active.idle
+            working = [int]$active.working
+            finished = [int]$active.finished
+        }
+        allVisible = [ordered]@{
+            idle = [int]$all.idle
+            working = [int]$all.working
+            finished = [int]$all.finished
+        }
+    }
+    $json = $payload | ConvertTo-Json -Compress -Depth 4
+    if ($json -eq $script:lastActivitySummaryJson) { return }
+    $script:lastActivitySummaryJson = $json
+    try {
+        $tmp = "$script:activitySummaryPath.tmp"
+        [System.IO.File]::WriteAllText($tmp, $json, [System.Text.Encoding]::UTF8)
+        Move-Item -LiteralPath $tmp -Destination $script:activitySummaryPath -Force
+    }
+    catch {
+        Write-ActivityDiagnostic "summary-write-failed $($_.Exception.Message)"
     }
 }
 
@@ -1022,6 +1071,7 @@ function Update-ActivityOverlay([IntPtr]$Strip, [object]$Overlay) {
     $dots = [Collections.Generic.List[object]]::new()
     $tabStates = [Collections.Generic.List[string]]::new()
     $threadsOnStrip = @{}
+    $summaryCounts = @{ idle = 0; working = 0; finished = 0 }
     foreach ($tab in $tabs) {
         try {
             $tabHandle = [IntPtr]$tab.Handle
@@ -1036,6 +1086,9 @@ function Update-ActivityOverlay([IntPtr]$Strip, [object]$Overlay) {
             $state = if ($EnableNeedsUserBridge -and (Test-CodexThreadNeedsUser $chat.ThreadId)) { 'needs-user' } else { Get-DisplayActivityState $tabHandle $chat }
             $rawState = $script:latestLifecycleByWindow[$tabHandle.ToInt64().ToString('X')]
             $tabStates.Add(('0x{0:X}|{1}|{2}|{3}' -f $tabHandle.ToInt64(), $chat.ThreadId, $rawState, $(if ($state) { $state } else { '<none>' })))
+            if ($state -eq 'working') { $summaryCounts.working++ }
+            elseif ($state -eq 'finished') { $summaryCounts.finished++ }
+            elseif (-not $state) { $summaryCounts.idle++ }
             if (-not $state) { continue }
             $dots.Add([pscustomobject]@{ Handle = $tabHandle; State = $state; Rect = $tab.Rect; ThreadId = $chat.ThreadId })
         }
@@ -1047,6 +1100,7 @@ function Update-ActivityOverlay([IntPtr]$Strip, [object]$Overlay) {
     }
     if ($AllGroupsCached) {
         $stripKey = $Strip.ToInt64().ToString('X')
+        $script:activitySummaryByStrip[$stripKey] = $summaryCounts
         foreach ($threadId in @($script:stripKeysByThread.Keys)) {
             if ($threadsOnStrip.ContainsKey($threadId)) { continue }
             if (-not $script:stripKeysByThread[$threadId].ContainsKey($stripKey)) { continue }
@@ -1244,7 +1298,9 @@ function Update-ActivityDots {
         Hide-ActivityOverlay $overlay
         $overlay.Window.Close()
         $script:overlaysByStrip.Remove($key)
+        if ($script:activitySummaryByStrip.ContainsKey($key)) { $script:activitySummaryByStrip.Remove($key) }
     }
+    if ($AllGroupsCached) { Publish-ActivitySummary }
     # A low-frequency watchdog proves the dispatcher is alive even when neither focus nor a
     # lifecycle state changes. It is deliberately best-effort and never participates in render.
     if (((Get-Date) - $script:lastHeartbeatAt).TotalSeconds -ge 15) {
