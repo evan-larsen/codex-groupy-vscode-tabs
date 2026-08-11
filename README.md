@@ -128,7 +128,7 @@ Keep `-WatchAutoTitle` running, then open a **second** PowerShell window in this
 .\scripts\GroupyNumberTabs.ps1
 ```
 
-It registers global `Ctrl+1` through `Ctrl+9`. While a Groupy-grouped VS Code window is focused, those shortcuts select the first through ninth visible Groupy tab, respectively. It does not use `Ctrl+Tab`, a cached order, or OCR on its normal path. For this installed Groupy 2.3.1 build, it reads GroupyCtrl's live ordered HWND array directly, then focuses the window at that current left-to-right position. Therefore manually dragging tabs into a new order is read directly from Groupy.
+It registers global `Ctrl+1` through `Ctrl+9`, but only consumes them while a Groupy-grouped VS Code window is focused. Outside VS Code, it temporarily releases the registration and passes the original `Ctrl+number` chord through to the foreground app, so browser tab shortcuts still work. While a Groupy-grouped VS Code window is focused, those shortcuts select the first through ninth visible Groupy tab, respectively. It does not use `Ctrl+Tab`, a cached order, or OCR on its normal path. For this installed Groupy 2.3.1 build, it reads GroupyCtrl's live ordered HWND array directly, then focuses the window at that current left-to-right position. Therefore manually dragging tabs into a new order is read directly from Groupy.
 
 Before starting the background helper, you can verify what it currently sees (with any target VS Code tab focused):
 

@@ -308,7 +308,8 @@ This repo registers:
 
 ```text
 Ctrl+1 through Ctrl+9
-  Select exact left-to-right visible Groupy tab positions.
+  Select exact left-to-right visible Groupy tab positions when a Groupy-linked VS Code window is focused.
+  Outside VS Code, the helper passes the original Ctrl+number chord through to the foreground app.
 
 Ctrl+Shift+N
   Duplicate the current VS Code workspace and physically detach it into a separate Groupy group.

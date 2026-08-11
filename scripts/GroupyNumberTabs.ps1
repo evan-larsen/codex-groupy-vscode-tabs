@@ -29,6 +29,7 @@ if (-not ('CodexGroupy.NumberTabsNativeV1' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Text;
 using System.Runtime.InteropServices;
 
@@ -67,8 +68,20 @@ namespace CodexGroupy {
         [DllImport("user32.dll", SetLastError = true)] private static extern bool RegisterHotKey(IntPtr hWnd, int id, int modifiers, int virtualKey);
         [DllImport("user32.dll", SetLastError = true)] private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
         [DllImport("user32.dll")] private static extern bool PeekMessage(out MSG msg, IntPtr hWnd, uint min, uint max, uint remove);
+        [DllImport("user32.dll")] private static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
 
         public static IntPtr GetGroupLink(IntPtr hWnd) { return GetProp(hWnd, "GP_LINK"); }
+        public static uint GetProcessId(IntPtr hWnd) { uint processId; GetWindowThreadProcessId(hWnd, out processId); return processId; }
+        public static bool IsCodeWindow(IntPtr hWnd) {
+            uint processId; GetWindowThreadProcessId(hWnd, out processId);
+            if (processId == 0) return false;
+            try {
+                var name = Process.GetProcessById((int)processId).ProcessName;
+                return string.Equals(name, "Code", StringComparison.OrdinalIgnoreCase) || string.Equals(name, "Code - Insiders", StringComparison.OrdinalIgnoreCase);
+            } catch {
+                return false;
+            }
+        }
         public static GroupMemberInfo[] GetGroupMembers(IntPtr link) {
             var members = new List<GroupMemberInfo>();
             EnumWindows((hWnd, _) => {
@@ -94,6 +107,15 @@ namespace CodexGroupy {
             for (int i = 1; i <= 9; i++) if (!RegisterHotKey(IntPtr.Zero, i, MOD_CONTROL, 0x30 + i)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not register Ctrl+" + i + ".");
         }
         public static void UnregisterNumberHotkeys() { for (int i = 1; i <= 9; i++) UnregisterHotKey(IntPtr.Zero, i); }
+        public static void SendCtrlNumber(int number) {
+            const uint KEYEVENTF_KEYUP = 0x0002;
+            byte vk = (byte)(0x30 + number);
+            // The user's physical Ctrl key is still down when WM_HOTKEY is delivered.
+            // Replay only the number key so the foreground non-VS-Code app receives its
+            // normal Ctrl+number shortcut without us disturbing modifier state.
+            keybd_event(vk, 0, 0, UIntPtr.Zero);
+            keybd_event(vk, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+        }
         public static int TakeNumberHotkey() {
             MSG message;
             return PeekMessage(out message, IntPtr.Zero, WM_HOTKEY, WM_HOTKEY, PM_REMOVE) ? message.wParam.ToInt32() : 0;
@@ -346,8 +368,15 @@ function Get-OrderedGroupMembers([IntPtr]$Link) {
 
 function Invoke-SelectGroupyTab([int]$Number) {
     $foreground = [CodexGroupy.NumberTabsNativeV1]::GetForegroundWindow()
+    if (-not [CodexGroupy.NumberTabsNativeV1]::IsCodeWindow($foreground)) {
+        Send-CtrlNumberPassthrough $Number
+        return
+    }
     $link = [CodexGroupy.NumberTabsNativeV1]::GetGroupLink($foreground)
-    if ($link -eq [IntPtr]::Zero) { return }
+    if ($link -eq [IntPtr]::Zero) {
+        Send-CtrlNumberPassthrough $Number
+        return
+    }
     # Fast path: no captions, PowerShell objects, UIA, or OCR are needed to select a live native
     # array entry. This is the path invoked by every Ctrl+number press.
     $nativeOrder = @(Get-NativeGroupyOrder $link)
@@ -357,6 +386,21 @@ function Invoke-SelectGroupyTab([int]$Number) {
     }
     $ordered = @(Get-OrderedGroupMembers $link)
     if ($Number -le $ordered.Count) { [CodexGroupy.NumberTabsNativeV1]::Focus($ordered[$Number - 1].Handle) }
+}
+
+function Send-CtrlNumberPassthrough([int]$Number) {
+    # RegisterHotKey is global, so Windows sends Ctrl+number here before Chrome/other apps can
+    # receive it. Outside a Groupy-linked VS Code window, temporarily release our registrations,
+    # replay the original chord, then immediately take ownership again.
+    try {
+        [CodexGroupy.NumberTabsNativeV1]::UnregisterNumberHotkeys()
+        Start-Sleep -Milliseconds 10
+        [CodexGroupy.NumberTabsNativeV1]::SendCtrlNumber($Number)
+        Start-Sleep -Milliseconds 10
+    }
+    finally {
+        [CodexGroupy.NumberTabsNativeV1]::RegisterNumberHotkeys()
+    }
 }
 
 if ($Inspect) {
