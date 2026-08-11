@@ -239,8 +239,8 @@ Open a separate Windows PowerShell window in this folder and run:
 .\scripts\GroupyUsageOverlay.ps1
 ```
 
-Expected badge text is similar to `Codex ○ 3  ● 1  ● 2      Context 78% left  |  Weekly 91%  ·  6d`.
-The white circle count is resolved Codex tabs with no current activity, the yellow count is running
+Expected badge text is similar to `Codex ● 3  ● 1  ● 2      Context 78% left  |  Weekly 91%  ·  6d`.
+The white dot count is resolved Codex tabs with no current activity, the yellow count is running
 turns, and the green count is unread completed turns waiting for you. `Context` is the active chat's
 model-context percentage remaining (so higher is better); the final weekly value is the rounded-up
 number of days until renewal. The overlay uses normal-weight `Segoe UI` text in `#dcdcdc` to remain

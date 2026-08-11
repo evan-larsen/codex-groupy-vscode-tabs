@@ -246,7 +246,7 @@ function Set-ActivityTextRuns([object]$Summary) {
     $prefix.Foreground = $overlayForeground
     [void]$activityText.Inlines.Add($prefix)
 
-    $idleRun = [System.Windows.Documents.Run]::new("○ $([int]$Summary.idle)  ")
+    $idleRun = [System.Windows.Documents.Run]::new("● $([int]$Summary.idle)  ")
     $idleRun.Foreground = $idleForeground
     [void]$activityText.Inlines.Add($idleRun)
 
