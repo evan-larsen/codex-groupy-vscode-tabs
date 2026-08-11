@@ -179,7 +179,7 @@ node PID 27316 -> ws://127.0.0.1:59269/b25ffbcb-6334-48a3-a802-20f107c98842
 PIDs are naturally volatile. Re-check with:
 
 ```powershell
-.\Start-CodexGroupyTools.ps1 -Status
+.\scripts\Start-CodexGroupyTools.ps1 -Status
 Get-CimInstance Win32_Process -Filter "name = 'node.exe'" |
   Where-Object { $_.CommandLine -match 'CodexVsCodeLiveRenameBridge\.js' } |
   Select-Object ProcessId,CreationDate,CommandLine |
@@ -191,9 +191,9 @@ Get-CimInstance Win32_Process -Filter "name = 'node.exe'" |
 Inspect current dots/runtime state:
 
 ```powershell
-.\GroupyCodexActivityDots.ps1 -Inspect -AllGroups
+.\scripts\GroupyCodexActivityDots.ps1 -Inspect -AllGroups
 Get-Content .\work\ActivityDotsRuntime.log -Tail 120
-.\Start-CodexGroupyTools.ps1 -Status
+.\scripts\Start-CodexGroupyTools.ps1 -Status
 ```
 
 Restart just activity dots:
@@ -207,7 +207,7 @@ $bridges = Get-CimInstance Win32_Process -Filter "name = 'node.exe'" |
   Where-Object { $_.CommandLine -match 'CodexVsCodeLiveRenameBridge\.js' }
 foreach ($b in $bridges) { Stop-Process -Id $b.ProcessId -ErrorAction SilentlyContinue }
 
-.\Start-CodexGroupyTools.ps1
+.\scripts\Start-CodexGroupyTools.ps1
 ```
 
 Probe inspector endpoints:
@@ -313,4 +313,3 @@ Cursor movement note:
 - keep all-groups rendering disabled by default
 - keep orange/private needs-input path disabled by default
 - diagnostics must never break the render loop
-

@@ -1089,7 +1089,8 @@ $nextAutoUiaProbeAtByHwnd = @{}
 $lastAutoEventGenerationByHwnd = @{}
 $nextAutoEventProbeAtByHwnd = @{}
 $lastUiAutomationWarningAt = [DateTime]::MinValue
-$titleSyncDiagnosticsPath = Join-Path $PSScriptRoot 'work\CodexGroupyTabSyncRuntime.log'
+$repoRoot = Split-Path -Path $PSScriptRoot -Parent
+$titleSyncDiagnosticsPath = Join-Path $repoRoot 'work\CodexGroupyTabSyncRuntime.log'
 function Write-TitleSyncDiagnostic([string]$Message) {
     try {
         $line = '[{0}] {1}' -f (Get-Date -Format 'HH:mm:ss.fff'), $Message

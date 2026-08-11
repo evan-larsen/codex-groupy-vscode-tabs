@@ -176,13 +176,13 @@ Important behavior:
 From the repo folder:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Start-CodexGroupyTools.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Start-CodexGroupyTools.ps1
 ```
 
 Check status:
 
 ```powershell
-.\Start-CodexGroupyTools.ps1 -Status
+.\scripts\Start-CodexGroupyTools.ps1 -Status
 ```
 
 Expected components:
@@ -204,20 +204,20 @@ The compatibility start script launches `CodexGroupySupervisor.ps1 -Start` in th
 Install the per-user Scheduled Task:
 
 ```powershell
-.\CodexGroupySupervisor.ps1 -InstallStartupTask
+.\scripts\CodexGroupySupervisor.ps1 -InstallStartupTask
 ```
 
 Verify:
 
 ```powershell
-.\CodexGroupySupervisor.ps1 -Status
+.\scripts\CodexGroupySupervisor.ps1 -Status
 Get-ScheduledTask -TaskName CodexGroupySupervisor
 ```
 
 Expected task action:
 
 ```text
-powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "<repo>\CodexGroupySupervisor.ps1" -Start
+powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "<repo>\scripts\CodexGroupySupervisor.ps1" -Start
 ```
 
 The task runs at Windows user logon. It does not require admin. It is configured to ignore duplicate starts, so running the task manually while the supervisor is already alive should not create duplicate helpers.
@@ -225,19 +225,19 @@ The task runs at Windows user logon. It does not require admin. It is configured
 To remove automatic startup:
 
 ```powershell
-.\CodexGroupySupervisor.ps1 -UninstallStartupTask
+.\scripts\CodexGroupySupervisor.ps1 -UninstallStartupTask
 ```
 
 To stop everything manually:
 
 ```powershell
-.\Stop-CodexGroupyTools.ps1
+.\scripts\Stop-CodexGroupyTools.ps1
 ```
 
 To restart everything manually:
 
 ```powershell
-.\CodexGroupySupervisor.ps1 -Restart
+.\scripts\CodexGroupySupervisor.ps1 -Restart
 ```
 
 ## Visual design and colors
@@ -247,7 +247,7 @@ To restart everything manually:
 Daily mode:
 
 ```powershell
-.\GroupyCodexActivityDots.ps1 -AllGroupsCached
+.\scripts\GroupyCodexActivityDots.ps1 -AllGroupsCached
 ```
 
 Defaults:
@@ -281,7 +281,7 @@ Current daily behavior:
 Daily mode:
 
 ```powershell
-.\GroupyUsageOverlay.ps1
+.\scripts\GroupyUsageOverlay.ps1
 ```
 
 Defaults:
@@ -357,7 +357,7 @@ All helpers are local. They do not use OCR for the normal path, do not scrape co
 Run this after setup:
 
 ```powershell
-.\CodexGroupySupervisor.ps1 -Status
+.\scripts\CodexGroupySupervisor.ps1 -Status
 ```
 
 Then verify manually:
@@ -378,7 +378,7 @@ Then verify manually:
 Status:
 
 ```powershell
-.\CodexGroupySupervisor.ps1 -Status
+.\scripts\CodexGroupySupervisor.ps1 -Status
 ```
 
 Logs:
@@ -393,25 +393,25 @@ Get-Content .\work\ActivityDotsRuntime.log -Tail 80
 Inspect title resolution:
 
 ```powershell
-.\CodexGroupyTabSync.ps1 -Inspect
+.\scripts\CodexGroupyTabSync.ps1 -Inspect
 ```
 
 Inspect Groupy tab order:
 
 ```powershell
-.\GroupyNumberTabs.ps1 -Inspect
+.\scripts\GroupyNumberTabs.ps1 -Inspect
 ```
 
 Inspect activity-dot mapping:
 
 ```powershell
-.\GroupyCodexActivityDots.ps1 -Inspect
+.\scripts\GroupyCodexActivityDots.ps1 -Inspect
 ```
 
 Inspect usage/context resolution:
 
 ```powershell
-.\GroupyUsageOverlay.ps1 -InspectContext
+.\scripts\GroupyUsageOverlay.ps1 -InspectContext
 ```
 
 Parse-check runtime PowerShell files:
@@ -440,8 +440,8 @@ Run:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\CodexGroupySupervisor.ps1 -Status
-.\CodexGroupySupervisor.ps1 -Restart
+.\scripts\CodexGroupySupervisor.ps1 -Status
+.\scripts\CodexGroupySupervisor.ps1 -Restart
 ```
 
 If scripts are blocked because they came from the internet:
@@ -462,8 +462,8 @@ Get-ScheduledTask -TaskName CodexGroupySupervisor
 Reinstall:
 
 ```powershell
-.\CodexGroupySupervisor.ps1 -UninstallStartupTask
-.\CodexGroupySupervisor.ps1 -InstallStartupTask
+.\scripts\CodexGroupySupervisor.ps1 -UninstallStartupTask
+.\scripts\CodexGroupySupervisor.ps1 -InstallStartupTask
 ```
 
 The task starts at user logon, not before login.
@@ -473,7 +473,7 @@ The task starts at user logon, not before login.
 Check:
 
 ```powershell
-.\CodexGroupyTabSync.ps1 -Inspect
+.\scripts\CodexGroupyTabSync.ps1 -Inspect
 ```
 
 Likely causes:
@@ -503,7 +503,7 @@ Check:
 
 ```powershell
 Get-Content .\work\ActivityDotsRuntime.log -Tail 120
-.\GroupyCodexActivityDots.ps1 -Inspect
+.\scripts\GroupyCodexActivityDots.ps1 -Inspect
 ```
 
 Expected daily mode is `-AllGroupsCached`. Do not use legacy `-AllGroups` for daily startup; it was retained only for investigation.
@@ -530,32 +530,37 @@ Then inspect the relevant log in `work\`.
 
 ## Repo layout
 
-Runtime files live at the repo root:
+Runtime files live in `scripts\`:
 
 ```text
-CodexGroupySupervisor.ps1
-Start-CodexGroupyTools.ps1
-Stop-CodexGroupyTools.ps1
-CodexGroupyTabSync.ps1
-CodexChatRenameHotkey.ps1
-GroupyNumberTabs.ps1
-GroupySeparateWindowHotkey.ps1
-GroupyWindowShortcuts.ps1
-GroupyUsageOverlay.ps1
-GroupyCodexActivityDots.ps1
-Get-CodexUsage.ps1
-CodexVsCodeLiveRenameBridge.js
+scripts\CodexGroupySupervisor.ps1
+scripts\Start-CodexGroupyTools.ps1
+scripts\Stop-CodexGroupyTools.ps1
+scripts\CodexGroupyTabSync.ps1
+scripts\CodexChatRenameHotkey.ps1
+scripts\GroupyNumberTabs.ps1
+scripts\GroupySeparateWindowHotkey.ps1
+scripts\GroupyWindowShortcuts.ps1
+scripts\GroupyUsageOverlay.ps1
+scripts\GroupyCodexActivityDots.ps1
+scripts\Get-CodexUsage.ps1
+scripts\CodexVsCodeLiveRenameBridge.js
 ```
 
-Helpful docs:
+Top-level docs:
 
 ```text
 README.md
 SETUP.md
-REVERSE_ENGINEERING_LOG.md
-ACTIVITY_DOTS_AUDIT_HANDOFF.md
-ACTIVITY_DOTS_LIVE_LIFECYCLE_HANDOFF.md
-ACTIVITY_DOTS_ALL_GROUPS_IMPLEMENTATION_PLAN.md
+```
+
+Detailed engineering docs live in `docs\`:
+
+```text
+docs\REVERSE_ENGINEERING_LOG.md
+docs\ACTIVITY_DOTS_AUDIT_HANDOFF.md
+docs\ACTIVITY_DOTS_LIVE_LIFECYCLE_HANDOFF.md
+docs\ACTIVITY_DOTS_ALL_GROUPS_IMPLEMENTATION_PLAN.md
 ```
 
 Preserved local evidence/experiments:
@@ -578,7 +583,7 @@ Pull latest changes:
 
 ```powershell
 git pull
-.\CodexGroupySupervisor.ps1 -Restart
+.\scripts\CodexGroupySupervisor.ps1 -Restart
 ```
 
 Check what changed locally:
@@ -594,4 +599,3 @@ git add .
 git commit -m "Describe the change"
 git push
 ```
-

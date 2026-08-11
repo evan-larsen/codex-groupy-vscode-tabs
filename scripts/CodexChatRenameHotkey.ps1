@@ -72,7 +72,8 @@ namespace CodexGroupy {
 }
 
 $sessionIndexPath = Join-Path $env:USERPROFILE '.codex\session_index.jsonl'
-$renameLogPath = Join-Path $PSScriptRoot 'work\CodexChatRenameHotkey.log'
+$repoRoot = Split-Path -Path $PSScriptRoot -Parent
+$renameLogPath = Join-Path $repoRoot 'work\CodexChatRenameHotkey.log'
 $script:sessionIndexTicks = -1L
 $script:sessionByTitle = @{}
 

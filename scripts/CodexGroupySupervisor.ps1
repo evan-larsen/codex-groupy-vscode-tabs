@@ -26,7 +26,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$repoRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
+$scriptRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
+$repoRoot = (Split-Path -Path $scriptRoot -Parent)
 $workDir = Join-Path $repoRoot 'work'
 if (-not (Test-Path -LiteralPath $workDir)) { [void](New-Item -ItemType Directory -Path $workDir -Force) }
 $logPath = Join-Path $workDir 'CodexGroupySupervisor.log'
@@ -48,7 +49,7 @@ function Write-SupervisorLog([string]$Message) {
 
 function Get-ResolvedHelpers {
     foreach ($helper in $helpers) {
-        $path = Join-Path $repoRoot $helper.Script
+        $path = Join-Path $scriptRoot $helper.Script
         if (-not (Test-Path -LiteralPath $path)) { throw "Missing helper: $path" }
         [pscustomObject]@{
             Name = $helper.Name

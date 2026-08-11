@@ -11,13 +11,13 @@ $ErrorActionPreference = 'Stop'
 
 $supervisor = Join-Path $PSScriptRoot 'CodexGroupySupervisor.ps1'
 if (-not (Test-Path -LiteralPath $supervisor)) { throw "Missing supervisor: $supervisor" }
+$repoRoot = (Split-Path -Path (Resolve-Path -LiteralPath $PSScriptRoot).Path -Parent)
 
 if ($Status) {
     & $supervisor -Status
     return
 }
 
-$repoRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
 $runningSupervisor = @(Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue | Where-Object {
     $commandLine = $_.CommandLine
     $commandLine -and
@@ -33,7 +33,7 @@ if ($runningSupervisor.Count -gt 0) {
 }
 
 $powershell = (Get-Command powershell.exe -CommandType Application -ErrorAction Stop).Source
-Start-Process -FilePath $powershell -ArgumentList @('-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', $supervisor, '-Start') -WorkingDirectory $PSScriptRoot -WindowStyle Hidden | Out-Null
+Start-Process -FilePath $powershell -ArgumentList @('-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', $supervisor, '-Start') -WorkingDirectory $repoRoot -WindowStyle Hidden | Out-Null
 Start-Sleep -Milliseconds 800
 Write-Host 'Codex / Groupy supervisor launched in the background.'
 & $supervisor -Status

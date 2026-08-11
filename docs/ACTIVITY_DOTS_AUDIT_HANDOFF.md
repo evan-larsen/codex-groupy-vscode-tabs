@@ -31,13 +31,13 @@ Use this to confirm process state:
 
 ```powershell
 cd C:\Users\evanl\Documents\groupy-vscode-codex-tabs
-.\Start-CodexGroupyTools.ps1 -Status
+.\scripts\Start-CodexGroupyTools.ps1 -Status
 ```
 
 Use this to stop every managed helper if necessary:
 
 ```powershell
-.\Stop-CodexGroupyTools.ps1
+.\scripts\Stop-CodexGroupyTools.ps1
 ```
 
 ## Machine and fixed-build assumptions
@@ -253,7 +253,7 @@ retained yellow. Therefore do **not** assume that fixing `$owner` completed the 
 The following command was added and works:
 
 ```powershell
-.\GroupyCodexActivityDots.ps1 -Inspect -AllGroups
+.\scripts\GroupyCodexActivityDots.ps1 -Inspect -AllGroups
 ```
 
 It prints direct Groupy strip/member HWNDs, captions, matching thread IDs, rollout path, and raw lifecycle state without
@@ -348,16 +348,16 @@ Potential audit concerns:
 cd C:\Users\evanl\Documents\groupy-vscode-codex-tabs
 
 # Raw state only; no overlay.
-.\GroupyCodexActivityDots.ps1 -Inspect -AllGroups
+.\scripts\GroupyCodexActivityDots.ps1 -Inspect -AllGroups
 
 # Tail current activity runtime diagnostics.
 Get-Content .\work\ActivityDotsRuntime.log -Tail 80
 
 # Confirm normal helpers without starting missing ones.
-.\Start-CodexGroupyTools.ps1 -Status
+.\scripts\Start-CodexGroupyTools.ps1 -Status
 
 # Run only the activity helper after you have a safe repair.
-.\GroupyCodexActivityDots.ps1
+.\scripts\GroupyCodexActivityDots.ps1
 
 # Stop it immediately if Groupy/VS Code becomes laggy.
 Get-CimInstance Win32_Process | Where-Object {

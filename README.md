@@ -11,31 +11,31 @@ hotkey, Chrome-style tab-number shortcuts, separate-group shortcut, usage/contex
 all-groups Codex activity dots running as quiet background helpers.
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Start-CodexGroupyTools.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Start-CodexGroupyTools.ps1
 ```
 
 It is safe to run again: an already-running supervisor is detected and left alone. Check what is running:
 
 ```powershell
-.\Start-CodexGroupyTools.ps1 -Status
+.\scripts\Start-CodexGroupyTools.ps1 -Status
 ```
 
 To stop every background helper started by this setup:
 
 ```powershell
-.\Stop-CodexGroupyTools.ps1
+.\scripts\Stop-CodexGroupyTools.ps1
 ```
 
 Install the supervisor to start automatically at Windows logon:
 
 ```powershell
-.\CodexGroupySupervisor.ps1 -InstallStartupTask
+.\scripts\CodexGroupySupervisor.ps1 -InstallStartupTask
 ```
 
 Remove that startup task:
 
 ```powershell
-.\CodexGroupySupervisor.ps1 -UninstallStartupTask
+.\scripts\CodexGroupySupervisor.ps1 -UninstallStartupTask
 ```
 
 ## Codex chat rename: Ctrl+Shift+R
@@ -51,7 +51,7 @@ The local `session_index.jsonl` is append-only, so historical revisions of the s
 Test it once while a Codex view is open in VS Code:
 
 ```powershell
-.\CodexChatRenameHotkey.ps1 -TestCurrent
+.\scripts\CodexChatRenameHotkey.ps1 -TestCurrent
 ```
 
 The helper deliberately declines to rename the home/new-chat screen. It also declines when two saved chats
@@ -81,7 +81,7 @@ Open at least two VS Code windows in the same Groupy group. From PowerShell, run
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
-.\CodexGroupyTabSync.ps1 -TestRename -StartDelaySeconds 5
+.\scripts\CodexGroupyTabSync.ps1 -TestRename -StartDelaySeconds 5
 ```
 
 Its Groupy tab should become `TEST CODEX TAB`. This is intentionally a manual first test because it changes a visible Groupy tab label.
@@ -91,7 +91,7 @@ Its Groupy tab should become `TEST CODEX TAB`. This is intentionally a manual fi
 This version-specific test changes the underlying VS Code window caption, rather than invoking Groupy's Rename Tab action:
 
 ```powershell
-.\CodexGroupyTabSync.ps1 -TestNativeTitle -TestTitle 'DIRECT TITLE TEST' -StartDelaySeconds 5
+.\scripts\CodexGroupyTabSync.ps1 -TestNativeTitle -TestTitle 'DIRECT TITLE TEST' -StartDelaySeconds 5
 ```
 
 On this machine, Groupy does change a fresh tab to `DIRECT TITLE TEST` without showing the rename dialog. It only works for tabs that have never been manually renamed; a manually renamed Groupy tab is marked custom and stops following the application caption.
@@ -99,7 +99,7 @@ On this machine, Groupy does change a fresh tab to `DIRECT TITLE TEST` without s
 Next, open an existing Codex conversation (not the blank Codex home/new-chat screen) and run:
 
 ```powershell
-.\CodexGroupyTabSync.ps1 -Inspect
+.\scripts\CodexGroupyTabSync.ps1 -Inspect
 ```
 
 Expected output includes each VS Code window's HWND, process, workspace label, and selected conversation title. If `CodexConversationTitle` is empty, keep the Codex conversation open and run the command again; the script deliberately refuses to guess on the home screen.
@@ -109,7 +109,7 @@ Expected output includes each VS Code window's HWND, process, workspace label, a
 For each manually renamed VS Code tab you want to migrate, close that window/tab and open a fresh VS Code window. Let Groupy group it normally, but do **not** use Groupy's Rename Tab command. Once an existing Codex chat is open in that window, run:
 
 ```powershell
-.\CodexGroupyTabSync.ps1 -WatchAutoTitle
+.\scripts\CodexGroupyTabSync.ps1 -WatchAutoTitle
 ```
 
 This writes the selected Codex conversation name directly to the foreground VS Code window caption. Groupy sees that normal caption change and updates its own tab, with no Rename Tab dialog. A selected conversation is shown as its clean chat title alone. The watcher reapplies the caption if VS Code later replaces it while you switch editor files.
@@ -117,7 +117,7 @@ This writes the selected Codex conversation name directly to the foreground VS C
 When you navigate to Codex's home/new-chat screen, the tab becomes `workspace - Codex home`. When the Codex webview is closed, it becomes `workspace - Codex closed`. Customize either label if you like:
 
 ```powershell
-.\CodexGroupyTabSync.ps1 -WatchAutoTitle -CodexHomeTitle 'Codex: choose a chat' -CodexClosedTitle 'VS Code'
+.\scripts\CodexGroupyTabSync.ps1 -WatchAutoTitle -CodexHomeTitle 'Codex: choose a chat' -CodexClosedTitle 'VS Code'
 ```
 
 ## Chrome-style Ctrl+1 through Ctrl+9 for the current Groupy / VS Code group
@@ -125,7 +125,7 @@ When you navigate to Codex's home/new-chat screen, the tab becomes `workspace - 
 Keep `-WatchAutoTitle` running, then open a **second** PowerShell window in this folder and run:
 
 ```powershell
-.\GroupyNumberTabs.ps1
+.\scripts\GroupyNumberTabs.ps1
 ```
 
 It registers global `Ctrl+1` through `Ctrl+9`. While a Groupy-grouped VS Code window is focused, those shortcuts select the first through ninth visible Groupy tab, respectively. It does not use `Ctrl+Tab`, a cached order, or OCR on its normal path. For this installed Groupy 2.3.1 build, it reads GroupyCtrl's live ordered HWND array directly, then focuses the window at that current left-to-right position. Therefore manually dragging tabs into a new order is read directly from Groupy.
@@ -133,7 +133,7 @@ It registers global `Ctrl+1` through `Ctrl+9`. While a Groupy-grouped VS Code wi
 Before starting the background helper, you can verify what it currently sees (with any target VS Code tab focused):
 
 ```powershell
-.\GroupyNumberTabs.ps1 -Inspect
+.\scripts\GroupyNumberTabs.ps1 -Inspect
 ```
 
 Example output:
@@ -153,19 +153,19 @@ This is intentionally scoped to the installed Groupy 2.3.1 layout. Stop the help
 For an already manually named Groupy tab, use this fallback:
 
 ```powershell
-.\CodexGroupyTabSync.ps1 -Watch
+.\scripts\CodexGroupyTabSync.ps1 -Watch
 ```
 
 ## Fallback and investigation notes
 
 `CodexGroupyTabSync-legacy-popup-free.ps1` is a byte-for-byte fallback copy of the earlier working helper. The main helper's legacy path uses immediate native spin-polling after the Rename Tab hotkey; it is the fastest reliable dialog-based route found so far.
 
-The optional `-UseInProcessNoFlashHook` experiment did not intercept Groupy's dialog because Groupy creates that dialog on a fresh UI thread each time. Do not use that switch. Progress toward the true no-dialog route is recorded in `REVERSE_ENGINEERING_LOG.md`.
+The optional `-UseInProcessNoFlashHook` experiment did not intercept Groupy's dialog because Groupy creates that dialog on a fresh UI thread each time. Do not use that switch. Progress toward the true no-dialog route is recorded in `docs\REVERSE_ENGINEERING_LOG.md`.
 
 To revert to the earlier helper, stop the watcher with `Ctrl+C` and run:
 
 ```powershell
-.\CodexGroupyTabSync-legacy-popup-free.ps1 -Watch
+.\archive\experiments\CodexGroupyTabSync-legacy-popup-free.ps1 -Watch
 ```
 
 The helper checks only the foreground `Code.exe` window ten times per second. It never activates or cycles inactive VS Code windows.
@@ -173,7 +173,7 @@ The helper checks only the foreground `Code.exe` window ten times per second. It
 Use `Ctrl+C` to stop it. To start it at logon later, create a shortcut whose target is:
 
 ```text
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Users\evanl\Documents\groupy-vscode-codex-tabs\CodexGroupyTabSync.ps1" -WatchAutoTitle
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Users\evanl\Documents\groupy-vscode-codex-tabs\scripts\CodexGroupyTabSync.ps1" -WatchAutoTitle
 ```
 
 ## Safety and behavior notes
@@ -210,13 +210,13 @@ login.
 Run it from any PowerShell window:
 
 ```powershell
-.\Get-CodexUsage.ps1
+.\scripts\Get-CodexUsage.ps1
 ```
 
 The output is a PowerShell object, so it is easy to use in a widget or another script:
 
 ```powershell
-$usage = .\Get-CodexUsage.ps1
+$usage = .\scripts\Get-CodexUsage.ps1
 "Weekly Codex usage: $($usage.WeeklyLimit); $($usage.Reset)"
 ```
 
@@ -236,7 +236,7 @@ names, or intercept mouse/keyboard input. It reads the same local app-server usa
 Open a separate Windows PowerShell window in this folder and run:
 
 ```powershell
-.\GroupyUsageOverlay.ps1
+.\scripts\GroupyUsageOverlay.ps1
 ```
 
 Expected badge text is similar to `Context 22%  |  Weekly 91%  ·  6d`. `Context` is the active chat's
@@ -251,13 +251,13 @@ drag ends instead of trying to chase the moving strip. Stop it with `Ctrl+C` in 
 window. To use a different refresh interval or move the badge farther left for a little more visual padding:
 
 ```powershell
-.\GroupyUsageOverlay.ps1 -RefreshSeconds 60 -RightMarginPixels 140
+.\scripts\GroupyUsageOverlay.ps1 -RefreshSeconds 60 -RightMarginPixels 140
 ```
 
 For a short visual test that exits by itself:
 
 ```powershell
-.\GroupyUsageOverlay.ps1 -TestSeconds 5
+.\scripts\GroupyUsageOverlay.ps1 -TestSeconds 5
 ```
 
 ## Codex activity dots
@@ -278,7 +278,7 @@ orange approval/input detection remains disabled while its separate Inspector-ba
 To inspect the raw Groupy-to-Codex mapping:
 
 ```powershell
-.\GroupyCodexActivityDots.ps1 -Inspect
+.\scripts\GroupyCodexActivityDots.ps1 -Inspect
 ```
 
 ### Context reading details

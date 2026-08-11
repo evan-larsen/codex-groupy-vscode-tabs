@@ -322,7 +322,7 @@ foreach ($p in $activity) { Stop-Process -Id $p.ProcessId -ErrorAction SilentlyC
 2. Restart without all-groups cached:
 
 ```powershell
-.\Start-CodexGroupyTools.ps1
+.\scripts\Start-CodexGroupyTools.ps1
 ```
 
 3. Keep active-strip mode as the known-good fallback.
