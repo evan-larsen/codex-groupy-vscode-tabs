@@ -1,4 +1,4 @@
-# Codex â†’ Groupy Tab Sync (proof of concept)
+# Codex → Groupy Tab Sync (proof of concept)
 
 This is a lightweight, local PowerShell helper for the specific workflow of one Codex conversation per VS Code window, grouped into tabs by Groupy 2.
 
@@ -240,8 +240,9 @@ Open a separate Windows PowerShell window in this folder and run:
 ```
 
 Expected badge text is similar to `Codex ● 3  ● 1  ● 2      Context 78% left  |  Weekly 91%  ·  6d`.
-The white dot count is resolved Codex tabs with no current activity, the yellow count is running
-turns, and the green count is unread completed turns waiting for you. `Context` is the active chat's
+The white dot count is all visible/resolved Codex tabs with no current activity, the yellow count is
+running turns, and the green count is unread completed turns waiting for you across all visible VS Code
+Groupy windows. `Context` is the active chat's
 model-context percentage remaining (so higher is better); the final weekly value is the rounded-up
 number of days until renewal. The overlay uses normal-weight `Segoe UI` text in `#dcdcdc` to remain
 subtle against the Groupy strip, with yellow/green status counts matching the activity dots.

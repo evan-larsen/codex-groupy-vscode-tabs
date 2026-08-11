@@ -111,38 +111,21 @@ $window.ShowActivated = $false
 $window.Focusable = $false
 
 $panel = [System.Windows.Controls.Grid]::new()
-$panel.ColumnDefinitions.Add([System.Windows.Controls.ColumnDefinition]::new())
-$panel.ColumnDefinitions.Add([System.Windows.Controls.ColumnDefinition]::new())
-$panel.ColumnDefinitions.Add([System.Windows.Controls.ColumnDefinition]::new())
-$panel.ColumnDefinitions[0].Width = [System.Windows.GridLength]::Auto
-$panel.ColumnDefinitions[1].Width = [System.Windows.GridLength]::new(22)
-$panel.ColumnDefinitions[2].Width = [System.Windows.GridLength]::new(1, [System.Windows.GridUnitType]::Star)
 $overlayForeground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromRgb(220, 220, 220))
 $idleForeground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromRgb(245, 245, 245))
 $workingForeground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromRgb(255, 205, 20))
 $finishedForeground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromRgb(67, 201, 109))
 
-$activityText = [System.Windows.Controls.TextBlock]::new()
-$activityText.FontFamily = [System.Windows.Media.FontFamily]::new('Segoe UI')
-$activityText.FontSize = 12
-$activityText.FontWeight = 'Normal'
-$activityText.VerticalAlignment = 'Center'
-$activityText.HorizontalAlignment = 'Left'
-
-$usageText = [System.Windows.Controls.TextBlock]::new()
-$usageText.Text = 'loading...'
-$usageText.FontFamily = [System.Windows.Media.FontFamily]::new('Segoe UI')
-$usageText.FontSize = 12
-$usageText.FontWeight = 'Normal'
-$usageText.Foreground = $overlayForeground
-$usageText.VerticalAlignment = 'Center'
-$usageText.HorizontalAlignment = 'Right'
-$usageText.TextAlignment = 'Right'
-
-[System.Windows.Controls.Grid]::SetColumn($activityText, 0)
-[System.Windows.Controls.Grid]::SetColumn($usageText, 2)
-[void]$panel.Children.Add($activityText)
-[void]$panel.Children.Add($usageText)
+$badgeText = [System.Windows.Controls.TextBlock]::new()
+$badgeText.Text = 'loading...'
+$badgeText.FontFamily = [System.Windows.Media.FontFamily]::new('Segoe UI')
+$badgeText.FontSize = 12
+$badgeText.FontWeight = 'Normal'
+$badgeText.Foreground = $overlayForeground
+$badgeText.VerticalAlignment = 'Center'
+$badgeText.HorizontalAlignment = 'Right'
+$badgeText.TextAlignment = 'Right'
+[void]$panel.Children.Add($badgeText)
 $window.Content = $panel
 
 $window.Add_SourceInitialized({
@@ -238,37 +221,14 @@ function Get-CodexContextCacheEntry([IntPtr]$Handle) {
     return $script:contextCache[$key]
 }
 
-function Set-ActivityTextRuns([object]$Summary) {
-    $activityText.Inlines.Clear()
-    if (-not $Summary) { return }
-
-    $prefix = [System.Windows.Documents.Run]::new('Codex  ')
-    $prefix.Foreground = $overlayForeground
-    [void]$activityText.Inlines.Add($prefix)
-
-    $idleRun = [System.Windows.Documents.Run]::new("● $([int]$Summary.idle)  ")
-    $idleRun.Foreground = $idleForeground
-    [void]$activityText.Inlines.Add($idleRun)
-
-    $workingRun = [System.Windows.Documents.Run]::new("● $([int]$Summary.working)  ")
-    $workingRun.Foreground = $workingForeground
-    [void]$activityText.Inlines.Add($workingRun)
-
-    $finishedRun = [System.Windows.Documents.Run]::new("● $([int]$Summary.finished)")
-    $finishedRun.Foreground = $finishedForeground
-    [void]$activityText.Inlines.Add($finishedRun)
-}
-
 function Get-ActivitySummaryForActiveStrip([IntPtr]$Foreground, [IntPtr]$Strip) {
     if ($Strip -eq [IntPtr]::Zero -or -not (Test-Path -LiteralPath $activitySummaryPath)) { return $null }
     try {
         $item = Get-Item -LiteralPath $activitySummaryPath -ErrorAction Stop
         if (((Get-Date) - $item.LastWriteTime).TotalSeconds -gt 10) { return $null }
         $summary = Get-Content -LiteralPath $activitySummaryPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-        if (-not $summary.activeStrip) { return $null }
-        $stripKey = $Strip.ToInt64().ToString('X')
-        if ([string]$summary.activeStrip.key -ne $stripKey) { return $null }
-        return $summary.activeStrip
+        if ($summary.allVisible) { return $summary.allVisible }
+        return $null
     }
     catch {
         return $null
@@ -345,9 +305,39 @@ function Get-CodexContextLabel([IntPtr]$Handle, [switch]$AllowUiAutomation) {
     return $entry.Label
 }
 
+function Set-ActivityTextRuns([object]$Summary) {
+    $badgeText.Inlines.Clear()
+    if (-not $Summary) { return }
+    $dot = [string][char]0x25CF
+
+    $prefix = [System.Windows.Documents.Run]::new('Codex  ')
+    $prefix.Foreground = $overlayForeground
+    [void]$badgeText.Inlines.Add($prefix)
+
+    $idleRun = [System.Windows.Documents.Run]::new("$dot $([int]$Summary.idle)  ")
+    $idleRun.Foreground = $idleForeground
+    [void]$badgeText.Inlines.Add($idleRun)
+
+    $workingRun = [System.Windows.Documents.Run]::new("$dot $([int]$Summary.working)  ")
+    $workingRun.Foreground = $workingForeground
+    [void]$badgeText.Inlines.Add($workingRun)
+
+    $finishedRun = [System.Windows.Documents.Run]::new("$dot $([int]$Summary.finished)")
+    $finishedRun.Foreground = $finishedForeground
+    [void]$badgeText.Inlines.Add($finishedRun)
+}
+
 function Update-OverlayText {
     Set-ActivityTextRuns $script:activityLabel
-    $usageText.Text = if ($script:contextLabel) { "$script:contextLabel  |  Weekly $script:usageLabel" } else { "Weekly $script:usageLabel" }
+    $usageLabel = if ($script:contextLabel) { "$script:contextLabel  |  Weekly $script:usageLabel" } else { "Weekly $script:usageLabel" }
+    if ($script:activityLabel) {
+        $spacer = [System.Windows.Documents.Run]::new('        ')
+        $spacer.Foreground = $overlayForeground
+        [void]$badgeText.Inlines.Add($spacer)
+    }
+    $usageRun = [System.Windows.Documents.Run]::new($usageLabel)
+    $usageRun.Foreground = $overlayForeground
+    [void]$badgeText.Inlines.Add($usageRun)
 }
 
 function Update-UsageText {
@@ -365,11 +355,11 @@ function Update-UsageText {
         }
         $percentLeft = [Math]::Round(100 - [double]$usage.UsedPercent)
         $script:usageLabel = "$percentLeft%  $([char]0x00B7)  $daysLabel"
-        $usageText.Foreground = $overlayForeground
+        $badgeText.Foreground = $overlayForeground
     }
     catch {
         $script:usageLabel = 'unavailable'
-        $usageText.Foreground = [System.Windows.Media.Brushes]::LightGray
+        $badgeText.Foreground = [System.Windows.Media.Brushes]::LightGray
     }
     Update-OverlayText
 }

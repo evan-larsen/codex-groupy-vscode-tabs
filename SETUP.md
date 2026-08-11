@@ -300,8 +300,8 @@ Expected text resembles:
 Codex ● 3  ● 1  ● 2      Context 78% left  |  Weekly 91% · 6d
 ```
 
-The white dot count is idle/resolved Codex tabs, the yellow count is running turns, and the green count is
-unread completed turns for the active Groupy strip. The badge is click-through and hides when the
+The white dot count is all visible/resolved Codex tabs, the yellow count is running turns, and the green count is
+unread completed turns across all visible VS Code Groupy windows. The badge is click-through and hides when the
 foreground window is not a grouped VS Code window.
 
 ## Hotkeys
