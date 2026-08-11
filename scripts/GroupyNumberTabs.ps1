@@ -250,19 +250,26 @@ function Get-CodexTitleForCodeWindow([IntPtr]$Handle) {
             $_.Current.ClassName -match 'flex-1\s+truncate' -and $_.Current.ClassName -match 'text-start'
         } | Select-Object -First 1
         if ($header) { return ConvertTo-GroupyTitle $header.Current.Name }
+        $workspace = Get-CodeWorkspaceNameForNumberTabs $root
+        if ($workspace) { return $workspace }
         return ConvertTo-GroupyTitle $CodexHomeTitle
     }
 
+    $workspace = Get-CodeWorkspaceNameForNumberTabs $root
+    if ($workspace) { return $workspace }
+    return ConvertTo-GroupyTitle $CodexClosedTitle
+}
+
+function Get-CodeWorkspaceNameForNumberTabs([System.Windows.Automation.AutomationElement]$Root) {
+    $all = Get-Descendants $Root
     $files = $all | Where-Object {
         $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Tree -and $_.Current.Name -eq 'Files Explorer'
     } | Select-Object -First 1
-    $workspace = $null
     if ($files) {
         $roots = @($files.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::TreeItem)))
-        if ($roots.Count -gt 0) { $workspace = ConvertTo-GroupyTitle $roots[0].Current.Name }
+        if ($roots.Count -gt 0) { return ConvertTo-GroupyTitle $roots[0].Current.Name }
     }
-    if ($workspace) { return ConvertTo-GroupyTitle "$workspace - $CodexClosedTitle" }
-    return ConvertTo-GroupyTitle $CodexClosedTitle
+    return $null
 }
 
 function Get-StripOcrWords([CodexGroupy.NumberTabsNativeV1+RECT]$Rect) {

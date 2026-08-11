@@ -1144,7 +1144,7 @@ while ($true) {
                         $rootForWorkspace = if ($root) { $root } else { [System.Windows.Automation.AutomationElement]::FromHandle($handle) }
                         $workspace = Get-CodeWorkspaceName $rootForWorkspace
                         if ($workspace) {
-                            ConvertTo-GroupyTitle "$workspace - $($target.Title)"
+                            $workspace
                         } else {
                             $target.Title
                         }

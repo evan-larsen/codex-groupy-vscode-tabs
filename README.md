@@ -114,7 +114,7 @@ For each manually renamed VS Code tab you want to migrate, close that window/tab
 
 This writes the selected Codex conversation name directly to the foreground VS Code window caption. Groupy sees that normal caption change and updates its own tab, with no Rename Tab dialog. A selected conversation is shown as its clean chat title alone. The watcher reapplies the caption if VS Code later replaces it while you switch editor files.
 
-When you navigate to Codex's home/new-chat screen, the tab becomes `workspace - Codex home`. When the Codex webview is closed, it becomes `workspace - Codex closed`. Customize either label if you like:
+When you navigate to Codex's home/new-chat screen or close the Codex webview, the tab falls back to the plain workspace/project directory label. If the workspace cannot be resolved, the helper falls back to `Codex home` or `Codex closed`; customize either fallback label if you like:
 
 ```powershell
 .\scripts\CodexGroupyTabSync.ps1 -WatchAutoTitle -CodexHomeTitle 'Codex: choose a chat' -CodexClosedTitle 'VS Code'
