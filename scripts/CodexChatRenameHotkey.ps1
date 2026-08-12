@@ -97,20 +97,31 @@ function Update-CodexSessionIndex {
     if ($script:sessionIndexTicks -eq $item.LastWriteTimeUtc.Ticks) { return }
 
     # session_index.jsonl is append-only: every title change produces another record for the
-    # same thread. Keep only the final record for each ID before detecting duplicate titles.
+    # same thread. Keep the final record for each ID as canonical, but also retain old title
+    # aliases. VS Code/Groupy can occasionally leave a window caption on the pre-rename title
+    # even after Codex persisted the new name; those stale captions should still resolve to
+    # the same thread as long as the old title is unambiguous.
     $latestById = @{}
+    $idsByTitle = @{}
     foreach ($line in Get-Content -LiteralPath $sessionIndexPath) {
         try { $entry = $line | ConvertFrom-Json -ErrorAction Stop } catch { continue }
         if (-not $entry.id -or -not $entry.PSObject.Properties['thread_name']) { continue }
-        $latestById[[string]$entry.id] = $entry
+        $id = [string]$entry.id
+        $latestById[$id] = $entry
+        $key = ConvertTo-CodexTitleKey ([string]$entry.thread_name)
+        if (-not $key) { continue }
+        if (-not $idsByTitle.ContainsKey($key)) { $idsByTitle[$key] = [Collections.Generic.List[string]]::new() }
+        if (-not $idsByTitle[$key].Contains($id)) { $idsByTitle[$key].Add($id) }
     }
 
     $byTitle = @{}
-    foreach ($entry in $latestById.Values) {
-        $key = ConvertTo-CodexTitleKey ([string]$entry.thread_name)
-        if (-not $key) { continue }
+    foreach ($key in $idsByTitle.Keys) {
         if (-not $byTitle.ContainsKey($key)) { $byTitle[$key] = [Collections.Generic.List[object]]::new() }
-        $byTitle[$key].Add($entry)
+        foreach ($id in $idsByTitle[$key]) {
+            if ($latestById.ContainsKey($id)) {
+                $byTitle[$key].Add($latestById[$id])
+            }
+        }
     }
     $script:sessionByTitle = $byTitle
     $script:sessionIndexTicks = $item.LastWriteTimeUtc.Ticks
