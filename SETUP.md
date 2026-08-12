@@ -267,10 +267,10 @@ Get-ScheduledTask -TaskName CodexGroupySupervisor
 Expected task action:
 
 ```text
-powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "<repo>\scripts\CodexGroupySupervisor.ps1" -Start
+powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "<repo>\scripts\Start-CodexGroupyTools.ps1"
 ```
 
-The task runs at Windows user logon. It does not require admin. It is configured to ignore duplicate starts, so running the task manually while the supervisor is already alive should not create duplicate helpers.
+The task runs at Windows user logon. It does not require admin. It launches the compatibility start wrapper, which starts the long-running supervisor as a detached hidden background process and then exits cleanly. It is configured to ignore duplicate starts, so running the task manually while the supervisor is already alive should not create duplicate helpers.
 
 To remove automatic startup:
 

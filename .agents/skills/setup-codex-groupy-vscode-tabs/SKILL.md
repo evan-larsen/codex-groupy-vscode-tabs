@@ -15,6 +15,7 @@ Use this skill to install or repair the Windows workflow in `codex-groupy-vscode
 - Active-window context/weekly usage badge.
 - `Ctrl+1`-`Ctrl+9`, `Ctrl+Shift+N`, and `Ctrl+Shift+R` helper hotkeys.
 - A Windows Scheduled Task that starts the helper supervisor at user logon.
+- The Scheduled Task should run `scripts\Start-CodexGroupyTools.ps1`; that wrapper starts the long-running supervisor detached and exits cleanly.
 
 This is Windows-specific and assumes Stardock Groupy 2, Windows PowerShell 5.1, VS Code, the ChatGPT/Codex VS Code extension, Node.js, and Git.
 

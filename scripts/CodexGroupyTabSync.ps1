@@ -1068,7 +1068,7 @@ if ($TestNativeTitle) {
 }
 
 if ($Inspect -or (-not $Watch -and -not $WatchAutoTitle)) {
-    $window = Get-ForegroundCodeWindow
+    $window = Get-ForegroundCodeWindow -IncludeRoot
     if ($window) {
         Write-DebugSnapshot $window
     } else {

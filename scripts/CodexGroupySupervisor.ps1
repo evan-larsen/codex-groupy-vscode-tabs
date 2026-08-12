@@ -156,14 +156,16 @@ function Show-Status {
 }
 
 function Install-StartupTask {
-    $scriptPath = (Resolve-Path -LiteralPath $PSCommandPath).Path
-    $argument = '-NoProfile -ExecutionPolicy Bypass -STA -File "{0}" -Start' -f $scriptPath
+    $startWrapperPath = Join-Path $scriptRoot 'Start-CodexGroupyTools.ps1'
+    if (-not (Test-Path -LiteralPath $startWrapperPath)) { throw "Missing startup wrapper: $startWrapperPath" }
+    $scriptPath = (Resolve-Path -LiteralPath $startWrapperPath).Path
+    $argument = '-NoProfile -ExecutionPolicy Bypass -STA -File "{0}"' -f $scriptPath
     $action = New-ScheduledTaskAction -Execute $powerShellExe -Argument $argument -WorkingDirectory $repoRoot
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
     $userId = [Security.Principal.WindowsIdentity]::GetCurrent().Name
     $principal = New-ScheduledTaskPrincipal -UserId $userId -LogonType Interactive -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -Hidden
-    $task = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Keeps Groupy/Codex VS Code helpers running for tab titles, activity dots, hotkeys, and overlays.'
+    $task = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Launches the detached Groupy/Codex helper supervisor for tab titles, activity dots, hotkeys, and overlays.'
     Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-Null
     Write-SupervisorLog "Installed Scheduled Task '$TaskName' for user $userId."
     Write-Host "Installed Scheduled Task '$TaskName'."

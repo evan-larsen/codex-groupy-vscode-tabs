@@ -4,6 +4,7 @@ work/*.err.log
 work/*.tmp
 work/*.pid
 work/*.json
+work/*.txt
 
 # Local machine backups created by setup automation
 backups/
