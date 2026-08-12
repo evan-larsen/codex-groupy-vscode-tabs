@@ -516,7 +516,10 @@ try {
             try {
                 Invoke-RenameCurrentCodexChat
             }
-            catch { Write-Warning $_.Exception.Message }
+            catch {
+                Write-RenameLog "Hotkey handling failed: $($_.Exception.Message)"
+                Write-Warning $_.Exception.Message
+            }
         }
         Start-Sleep -Milliseconds 25
     }
