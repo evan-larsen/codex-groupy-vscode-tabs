@@ -1,0 +1,7 @@
+interface:
+  display_name: "Work on Groupy Codex"
+  short_description: "Hack on the Groupy Codex workflow."
+  default_prompt: "Use $work-on-groupy-codex to work on the Groupy/Codex VS Code automation stack."
+
+policy:
+  allow_implicit_invocation: true
