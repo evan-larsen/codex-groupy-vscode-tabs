@@ -129,10 +129,10 @@ When changing helpers:
 1. Confirm the current process state.
 2. Make the smallest useful patch.
 3. Parse-check changed PowerShell files.
-4. Restart only affected helpers when possible.
+4. Restart affected background helpers automatically when possible, preferably only the changed helper rather than the whole stack.
 5. Test in real VS Code/Groupy windows.
 6. Check logs for errors and slow-update lines.
-7. Commit and push if the user expects repo persistence.
+7. Commit and push every successful repo change by default, unless the user explicitly says not to, the change is only a throwaway probe, or validation failed.
 
 Parse-check:
 
@@ -151,6 +151,32 @@ foreach ($file in Get-ChildItem .\scripts -File -Filter *.ps1 | Sort-Object Name
   }
 }
 if ($failed) { exit 1 }
+```
+
+## Background process management
+
+Assume runtime script changes should be made live for the user without requiring them to manually restart things.
+
+- If a managed helper script changes, stop that helper process and let `CodexGroupySupervisor.ps1` restart it, or use `.\scripts\CodexGroupySupervisor.ps1 -Restart` when the change affects multiple helpers/supervisor wiring.
+- If `CodexGroupySupervisor.ps1`, `Start-CodexGroupyTools.ps1`, or helper arguments change, reinstall/restart the relevant startup/supervisor path when needed.
+- If a change only affects docs, skills, README, setup, or non-runtime archive files, do not restart helpers.
+- Before stopping a helper, identify the exact process by repo root + script name. Do not kill broad `powershell.exe` processes.
+- After restart, run `.\scripts\CodexGroupySupervisor.ps1 -Status` and inspect the relevant log tail.
+
+Targeted helper stop pattern:
+
+```powershell
+$scriptName = 'CodexChatRenameHotkey.ps1'
+$helper = Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
+  Where-Object {
+    $_.CommandLine -match [regex]::Escape('groupy-vscode-codex-tabs') -and
+    $_.CommandLine -match [regex]::Escape($scriptName)
+  }
+foreach ($process in $helper) {
+  Stop-Process -Id $process.ProcessId -ErrorAction Stop
+}
+Start-Sleep -Seconds 10
+.\scripts\CodexGroupySupervisor.ps1 -Status
 ```
 
 ## Performance rules
@@ -243,6 +269,8 @@ Preserve rename safety:
 
 ## Commit hygiene
 
+Commit and push successful changes by default. The user expects the repo to stay up to date after edits, especially skill/doc/runtime fixes.
+
 Before committing:
 
 ```powershell
@@ -252,7 +280,12 @@ git diff
 
 Do not commit ignored runtime state from `work\`, `backups\`, screenshots, or generated native binaries. If a new local runtime file appears, add a narrow `.gitignore` rule rather than committing secrets or volatile state.
 
-Use clear commit messages and push when the user asks for persistent repo updates.
+Use clear commit messages and push immediately after validation. Skip automatic commit/push only when:
+
+- the user explicitly says not to commit/push;
+- the change is an intentionally temporary probe;
+- validation failed or the helper is not yet working;
+- committing would include unrelated user changes that need clarification.
 
 ## If blocked
 
