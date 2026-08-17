@@ -944,6 +944,18 @@ function Get-CodeWorkspaceName([System.Windows.Automation.AutomationElement]$Roo
     return $null
 }
 
+function Get-WorkspaceNameFromNativeTitle([string]$Title) {
+    # Before this helper changes a caption, VS Code uses "file - workspace - Visual Studio Code".
+    # The final segment is stable even when the active editor file changes, so it is a useful
+    # fallback when VS Code's Files Explorer accessibility tree is temporarily unavailable.
+    $clean = ConvertTo-GroupyTitle $Title
+    if (-not $clean) { return $null }
+    $clean = $clean -replace '\s+-\s+Visual Studio Code$', ''
+    $parts = @($clean -split '\s+-\s+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($parts.Count -ge 2) { return ConvertTo-GroupyTitle $parts[$parts.Count - 1] }
+    return $null
+}
+
 function Get-WorkspaceLabel([System.Windows.Automation.AutomationElement]$Root) {
     $name = $Root.Current.Name
     return ($name -replace '\s+-\s+Visual Studio Code$', '')
@@ -1088,6 +1100,7 @@ $lastAutoTargetByHwnd = @{}
 $nextAutoUiaProbeAtByHwnd = @{}
 $lastAutoEventGenerationByHwnd = @{}
 $nextAutoEventProbeAtByHwnd = @{}
+$workspaceNameByHwnd = @{}
 $lastUiAutomationWarningAt = [DateTime]::MinValue
 $repoRoot = Split-Path -Path $PSScriptRoot -Parent
 $titleSyncDiagnosticsPath = Join-Path $repoRoot 'work\CodexGroupyTabSyncRuntime.log'
@@ -1138,11 +1151,21 @@ while ($true) {
                     $nextAutoEventProbeAtByHwnd[$key] = $now.AddMilliseconds(500)
                 }
                 if ($target.Title) {
+                    # Cache the native VS Code workspace label while it still owns the caption.
+                    # That cache is then available the instant Codex moves to Home or is closed.
+                    $nativeWorkspace = Get-WorkspaceNameFromNativeTitle $nativeTitle
+                    if ($nativeWorkspace) { $workspaceNameByHwnd[$key] = $nativeWorkspace }
                     $desiredTitle = if ($target.State -eq 'chat') {
                         $target.Title
                     } else {
                         $rootForWorkspace = if ($root) { $root } else { [System.Windows.Automation.AutomationElement]::FromHandle($handle) }
                         $workspace = Get-CodeWorkspaceName $rootForWorkspace
+                        if (-not $workspace -and $workspaceNameByHwnd.ContainsKey($key)) {
+                            $workspace = $workspaceNameByHwnd[$key]
+                        }
+                        if (-not $workspace) {
+                            $workspace = Get-WorkspaceNameFromNativeTitle $nativeTitle
+                        }
                         if ($workspace) {
                             $workspace
                         } else {

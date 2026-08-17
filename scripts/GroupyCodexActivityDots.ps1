@@ -1360,14 +1360,18 @@ elseif ($AllGroups) {
 else {
     Write-Host 'Showing activity dots on the active Groupy / VS Code tab strip. Press Ctrl+C to stop.'
 }
-Write-ActivityDiagnostic 'Activity helper started.'
+Write-ActivityDiagnostic "Activity helper started; testSeconds=$TestSeconds."
 
 $frame = [System.Windows.Threading.DispatcherFrame]::new()
 $testTimer = $null
 if ($TestSeconds -gt 0) {
     $testTimer = [System.Windows.Threading.DispatcherTimer]::new()
     $testTimer.Interval = [TimeSpan]::FromSeconds($TestSeconds)
-    $testTimer.Add_Tick({ $testTimer.Stop(); $frame.Continue = $false })
+    $testTimer.Add_Tick({
+        Write-ActivityDiagnostic "Test timer elapsed after $TestSeconds seconds; stopping activity helper."
+        $testTimer.Stop()
+        $frame.Continue = $false
+    })
     $testTimer.Start()
 }
 
@@ -1379,7 +1383,7 @@ catch {
     throw
 }
 finally {
-    Write-ActivityDiagnostic 'Activity helper stopping.'
+    Write-ActivityDiagnostic "Activity helper stopping; frameContinue=$($frame.Continue); testSeconds=$TestSeconds."
     $timer.Stop()
     $pulseTimer.Stop()
     if ($testTimer) { $testTimer.Stop() }
