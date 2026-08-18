@@ -330,7 +330,31 @@ namespace CodexGroupy {
 
 $sessionIndexPath = Join-Path $env:USERPROFILE '.codex\session_index.jsonl'
 $sessionsRoot = Join-Path $env:USERPROFILE '.codex\sessions'
-$script:rgPath = @(Get-Command rg -CommandType Application -ErrorAction Stop | Select-Object -First 1)[0].Source
+
+function Resolve-RipgrepPath {
+    # The logon task does not inherit VS Code's extension PATH.  Prefer a PATH copy for
+    # development, but locate the extension-bundled binary directly for unattended startup.
+    $command = Get-Command rg.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $command) {
+        $command = Get-Command rg -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    }
+    if ($command) { return $command.Source }
+
+    $extensionsRoot = Join-Path $env:USERPROFILE '.vscode\extensions'
+    if (Test-Path -LiteralPath $extensionsRoot) {
+        $extensions = @(Get-ChildItem -LiteralPath $extensionsRoot -Directory -Filter 'openai.chatgpt-*' -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTimeUtc -Descending)
+        foreach ($extension in $extensions) {
+            $bundled = Get-ChildItem -LiteralPath (Join-Path $extension.FullName 'bin') -Recurse -File -Filter 'rg.exe' -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+            if ($bundled) { return $bundled.FullName }
+        }
+    }
+
+    throw 'Could not find rg.exe. Install or reload the ChatGPT/Codex VS Code extension, then restart the Codex/Groupy supervisor.'
+}
+
+$script:rgPath = Resolve-RipgrepPath
 $script:sessionIndexTicks = -1L
 $script:logByTitle = @{}
 $script:logPathByThreadId = @{}
