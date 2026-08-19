@@ -168,6 +168,7 @@ HKCU\Software\Stardock\Groupy\Groupy.ini\Groupy
   AllowHideWin11Tabs = 0
   AlsoRegisterCtrlKeys = 1
   AlsoRegisterRenameKey = 0
+  AlwaysGroupIdentical = 1
   AlwaysPaintSingleTab = 1
   AutoHideMode = 0
   DefinedHotKeyRename = 458865

@@ -24,6 +24,9 @@ $desiredRegistry = @(
     [pscustomobject]@{ Path = $groupyIniKey; Name = 'AllowHideWin11Tabs'; Value = 0 },
     [pscustomobject]@{ Path = $groupyIniKey; Name = 'AlsoRegisterCtrlKeys'; Value = 1 },
     [pscustomobject]@{ Path = $groupyIniKey; Name = 'AlsoRegisterRenameKey'; Value = 0 },
+    # Restored VS Code windows should reunite after Windows logon. Groupy's condition
+    # preserves explicitly detached Groupy groups such as Ctrl+Shift+N creates.
+    [pscustomobject]@{ Path = $groupyIniKey; Name = 'AlwaysGroupIdentical'; Value = 1 },
     [pscustomobject]@{ Path = $groupyIniKey; Name = 'AlwaysPaintSingleTab'; Value = 1 },
     [pscustomobject]@{ Path = $groupyIniKey; Name = 'AskedAboutDelayGrouping'; Value = 1 },
     [pscustomobject]@{ Path = $groupyIniKey; Name = 'AutoHideMode'; Value = 0 },
