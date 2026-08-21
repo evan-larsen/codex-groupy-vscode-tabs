@@ -10,6 +10,10 @@ The normal setup is owned by `CodexGroupySupervisor.ps1`. It keeps the title wat
 hotkey, Chrome-style tab-number shortcuts, separate-group shortcut, usage/context overlay, and cached
 all-groups Codex activity dots running as quiet background helpers.
 
+The supervisor also reloads an individual helper after one of its local runtime inputs changes. In
+particular, the activity-dot helper is relaunched when its PowerShell script or live-Codex bridge is updated,
+so it cannot remain running indefinitely with stale in-memory dot-discovery code.
+
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Start-CodexGroupyTools.ps1
 ```

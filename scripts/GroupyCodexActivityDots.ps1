@@ -891,6 +891,8 @@ function Test-CodexThreadNeedsUser([string]$ThreadId) {
 
 function Get-GroupyTabs([IntPtr]$Strip) {
     try {
+        # The controller process and its module base are session-scoped.  If Groupy restarts
+        # during an update, the catch below drops this cache and the next tick rediscovers it.
         if (-not $script:groupyController) {
             $controller = Get-Process GroupyCtrl -ErrorAction Stop | Select-Object -First 1
             $module = $controller.Modules | Where-Object { $_.ModuleName -eq 'GroupyCtrl.exe' } | Select-Object -First 1

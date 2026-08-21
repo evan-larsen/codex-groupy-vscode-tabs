@@ -34,12 +34,14 @@ $logPath = Join-Path $workDir 'CodexGroupySupervisor.log'
 $powerShellExe = (Get-Command powershell.exe -CommandType Application -ErrorAction Stop).Source
 
 $helpers = @(
-    [pscustomobject]@{ Name = 'Codex tab-title sync'; Script = 'CodexGroupyTabSync.ps1'; Arguments = @('-WatchAutoTitle') },
-    [pscustomobject]@{ Name = 'Codex chat rename Ctrl+Shift+R'; Script = 'CodexChatRenameHotkey.ps1'; Arguments = @() },
-    [pscustomobject]@{ Name = 'Groupy Ctrl+1 through Ctrl+9'; Script = 'GroupyNumberTabs.ps1'; Arguments = @() },
-    [pscustomobject]@{ Name = 'Separate-group Ctrl+Shift+N'; Script = 'GroupySeparateWindowHotkey.ps1'; Arguments = @() },
-    [pscustomobject]@{ Name = 'Usage/context overlay'; Script = 'GroupyUsageOverlay.ps1'; Arguments = @() },
-    [pscustomobject]@{ Name = 'Codex activity dots'; Script = 'GroupyCodexActivityDots.ps1'; Arguments = @('-AllGroupsCached') }
+    [pscustomobject]@{ Name = 'Codex tab-title sync'; Script = 'CodexGroupyTabSync.ps1'; Arguments = @('-WatchAutoTitle'); ReloadInputs = @('CodexGroupyTabSync.ps1') },
+    [pscustomobject]@{ Name = 'Codex chat rename Ctrl+Shift+R'; Script = 'CodexChatRenameHotkey.ps1'; Arguments = @(); ReloadInputs = @('CodexChatRenameHotkey.ps1', 'CodexVsCodeLiveRenameBridge.js') },
+    [pscustomobject]@{ Name = 'Groupy Ctrl+1 through Ctrl+9'; Script = 'GroupyNumberTabs.ps1'; Arguments = @(); ReloadInputs = @('GroupyNumberTabs.ps1') },
+    [pscustomobject]@{ Name = 'Separate-group Ctrl+Shift+N'; Script = 'GroupySeparateWindowHotkey.ps1'; Arguments = @(); ReloadInputs = @('GroupySeparateWindowHotkey.ps1') },
+    [pscustomobject]@{ Name = 'Usage/context overlay'; Script = 'GroupyUsageOverlay.ps1'; Arguments = @(); ReloadInputs = @('GroupyUsageOverlay.ps1') },
+    # Dots also launch the Node bridge.  Keep both pieces in step so an update cannot leave
+    # a long-lived helper running stale in-memory code and silently drawing no indicators.
+    [pscustomobject]@{ Name = 'Codex activity dots'; Script = 'GroupyCodexActivityDots.ps1'; Arguments = @('-AllGroupsCached'); ReloadInputs = @('GroupyCodexActivityDots.ps1', 'CodexVsCodeLiveRenameBridge.js') }
 )
 
 function Write-SupervisorLog([string]$Message) {
@@ -56,6 +58,7 @@ function Get-ResolvedHelpers {
             Script = $helper.Script
             Path = (Resolve-Path -LiteralPath $path).Path
             Arguments = $helper.Arguments
+            ReloadInputPaths = @($helper.ReloadInputs | ForEach-Object { Join-Path $scriptRoot $_ })
         }
     }
 }
@@ -105,6 +108,21 @@ function Stop-Helper([pscustomobject]$Helper) {
             Write-SupervisorLog "$($Helper.Name): failed to stop PID $($process.ProcessId): $($_.Exception.Message)"
         }
     }
+}
+
+function Get-HelperReloadReason([pscustomobject]$Helper, [object]$Process) {
+    # A managed helper only loads its scripts at launch.  Treat a newer local dependency as
+    # a precise health signal, rather than letting a process with old in-memory code run forever.
+    try {
+        $startedAtUtc = (Get-Process -Id $Process.ProcessId -ErrorAction Stop).StartTime.ToUniversalTime()
+        foreach ($inputPath in @($Helper.ReloadInputPaths)) {
+            if (-not (Test-Path -LiteralPath $inputPath)) { continue }
+            $input = Get-Item -LiteralPath $inputPath -ErrorAction Stop
+            if ($input.LastWriteTimeUtc -gt $startedAtUtc) { return (Split-Path -Path $inputPath -Leaf) }
+        }
+    }
+    catch {}
+    return $null
 }
 
 function Start-AllHelpers {
@@ -236,6 +254,19 @@ try {
             $running = @(Get-RunningHelper $helper.Path)
             if ($running.Count -eq 0) {
                 [void](Start-Helper $helper)
+            }
+            elseif ($running.Count -eq 1) {
+                $reloadReason = Get-HelperReloadReason $helper $running[0]
+                if ($reloadReason) {
+                    try {
+                        Stop-Process -Id $running[0].ProcessId -ErrorAction Stop
+                        Write-SupervisorLog "$($helper.Name): reloading PID $($running[0].ProcessId) because $reloadReason changed."
+                        [void](Start-Helper $helper)
+                    }
+                    catch {
+                        Write-SupervisorLog "$($helper.Name): failed to reload PID $($running[0].ProcessId): $($_.Exception.Message)"
+                    }
+                }
             }
             elseif ($running.Count -gt 1) {
                 $keepers = @($running | Sort-Object ProcessId)
