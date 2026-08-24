@@ -180,12 +180,16 @@ function Install-StartupTask {
     $argument = '-NoProfile -ExecutionPolicy Bypass -STA -File "{0}"' -f $scriptPath
     $action = New-ScheduledTaskAction -Execute $powerShellExe -Argument $argument -WorkingDirectory $repoRoot
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+    # PowerShell can fail to initialize when Task Scheduler launches it at the exact
+    # moment an interactive desktop is being created.  Give the user session a short,
+    # fixed settling period before starting the detached supervisor.
+    $trigger.Delay = 'PT30S'
     $userId = [Security.Principal.WindowsIdentity]::GetCurrent().Name
     $principal = New-ScheduledTaskPrincipal -UserId $userId -LogonType Interactive -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -Hidden
     $task = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Launches the detached Groupy/Codex helper supervisor for tab titles, activity dots, hotkeys, and overlays.'
     Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-Null
-    Write-SupervisorLog "Installed Scheduled Task '$TaskName' for user $userId."
+    Write-SupervisorLog "Installed Scheduled Task '$TaskName' for user $userId with a 30-second logon delay."
     Write-Host "Installed Scheduled Task '$TaskName'."
 }
 

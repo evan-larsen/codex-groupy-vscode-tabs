@@ -271,7 +271,7 @@ Expected task action:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "<repo>\scripts\Start-CodexGroupyTools.ps1"
 ```
 
-The task runs at Windows user logon. It does not require admin. It launches the compatibility start wrapper, which starts the long-running supervisor as a detached hidden background process and then exits cleanly. It is configured to ignore duplicate starts, so running the task manually while the supervisor is already alive should not create duplicate helpers.
+The task runs 30 seconds after Windows user logon. It does not require admin. The short delay gives the interactive Windows session time to finish initializing before PowerShell starts, avoiding intermittent logon-time launch failures. It launches the compatibility start wrapper, which starts the long-running supervisor as a detached hidden background process and then exits cleanly. It is configured to ignore duplicate starts, so running the task manually while the supervisor is already alive should not create duplicate helpers.
 
 To remove automatic startup:
 
