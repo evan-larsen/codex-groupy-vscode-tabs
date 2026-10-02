@@ -243,9 +243,9 @@ Open a separate Windows PowerShell window in this folder and run:
 .\scripts\GroupyUsageOverlay.ps1
 ```
 
-Expected badge text is similar to `Context 78% left  |  Weekly 91%  ·  6d`.
+Expected badge text is similar to `Context 78% left  |  Weekly 91%  ·  5d 16h`.
 `Context` is the active chat's model-context percentage remaining (so higher is better); the final
-weekly value is the rounded-up number of days until renewal. The overlay uses normal-weight
+weekly value shows whole days and hours until renewal (or `<1h` in the final hour). The overlay uses normal-weight
 `Segoe UI` text in `#dcdcdc` to remain subtle against the Groupy strip.
 The badge is transparent except for its white text, so
 it visually reads as part of the tab strip. It automatically hides whenever the

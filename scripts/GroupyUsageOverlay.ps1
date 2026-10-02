@@ -293,17 +293,17 @@ function Update-UsageText {
     try {
         $usage = & $usageScript
         $timeRemaining = $usage.Reset - (Get-Date)
-        $daysLabel = if ($timeRemaining.TotalSeconds -le 0) {
+        $resetLabel = if ($timeRemaining.TotalSeconds -le 0) {
             'now'
         }
-        elseif ($timeRemaining.TotalDays -lt 1) {
-            '<1d'
+        elseif ($timeRemaining.TotalHours -lt 1) {
+            '<1h'
         }
         else {
-            ('{0}d' -f [Math]::Ceiling($timeRemaining.TotalDays))
+            ('{0}d {1}h' -f [Math]::Floor($timeRemaining.TotalDays), $timeRemaining.Hours)
         }
         $percentLeft = [Math]::Round(100 - [double]$usage.UsedPercent)
-        $script:usageLabel = "$percentLeft%  $([char]0x00B7)  $daysLabel"
+        $script:usageLabel = "$percentLeft%  $([char]0x00B7)  $resetLabel"
         $badgeText.Foreground = $overlayForeground
     }
     catch {
