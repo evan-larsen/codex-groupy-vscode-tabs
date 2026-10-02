@@ -16,7 +16,6 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$repoRoot = Split-Path -Path $PSScriptRoot -Parent
 
 if ([Threading.Thread]::CurrentThread.ApartmentState -ne 'STA') {
     throw 'Run this helper with Windows PowerShell (powershell.exe), which uses STA for the transparent overlay window.'
@@ -99,7 +98,7 @@ namespace CodexGroupy {
 }
 
 $window = [System.Windows.Window]::new()
-$window.Width = 430
+$window.Width = 280
 $window.Height = 29
 $window.WindowStyle = 'None'
 $window.ResizeMode = 'NoResize'
@@ -112,9 +111,6 @@ $window.Focusable = $false
 
 $panel = [System.Windows.Controls.Grid]::new()
 $overlayForeground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromRgb(220, 220, 220))
-$idleForeground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromRgb(245, 245, 245))
-$workingForeground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromRgb(255, 205, 20))
-$finishedForeground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromRgb(67, 201, 109))
 
 $badgeText = [System.Windows.Controls.TextBlock]::new()
 $badgeText.Text = 'loading...'
@@ -137,12 +133,10 @@ $window.Add_SourceInitialized({
 })
 
 $usageScript = Join-Path $PSScriptRoot 'Get-CodexUsage.ps1'
-$activitySummaryPath = Join-Path $repoRoot 'work\ActivityDotsSummary.json'
 $sessionIndexPath = Join-Path $env:USERPROFILE '.codex\session_index.jsonl'
 $sessionsRoot = Join-Path $env:USERPROFILE '.codex\sessions'
 $script:usageLabel = 'loading...'
 $script:contextLabel = $null
-$script:activityLabel = $null
 $script:contextCache = @{}
 
 function ConvertTo-CodexTitleKey([string]$Title) {
@@ -221,20 +215,6 @@ function Get-CodexContextCacheEntry([IntPtr]$Handle) {
     return $script:contextCache[$key]
 }
 
-function Get-ActivitySummaryForActiveStrip([IntPtr]$Foreground, [IntPtr]$Strip) {
-    if ($Strip -eq [IntPtr]::Zero -or -not (Test-Path -LiteralPath $activitySummaryPath)) { return $null }
-    try {
-        $item = Get-Item -LiteralPath $activitySummaryPath -ErrorAction Stop
-        if (((Get-Date) - $item.LastWriteTime).TotalSeconds -gt 10) { return $null }
-        $summary = Get-Content -LiteralPath $activitySummaryPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-        if ($summary.allVisible) { return $summary.allVisible }
-        return $null
-    }
-    catch {
-        return $null
-    }
-}
-
 function Get-CachedCodexContextLabel([IntPtr]$Handle) {
     $key = $Handle.ToInt64().ToString('X')
     if ($script:contextCache.ContainsKey($key)) { return $script:contextCache[$key].Label }
@@ -305,40 +285,8 @@ function Get-CodexContextLabel([IntPtr]$Handle, [switch]$AllowUiAutomation) {
     return $entry.Label
 }
 
-function Set-ActivityTextRuns([object]$Summary) {
-    $badgeText.Inlines.Clear()
-    if (-not $Summary) { return }
-    $dot = [string][char]0x25CF
-    $thinSpace = [string][char]0x2009
-
-    $prefix = [System.Windows.Documents.Run]::new('Codex  ')
-    $prefix.Foreground = $overlayForeground
-    [void]$badgeText.Inlines.Add($prefix)
-
-    $idleRun = [System.Windows.Documents.Run]::new("$dot$thinSpace$([int]$Summary.idle)   ")
-    $idleRun.Foreground = $idleForeground
-    [void]$badgeText.Inlines.Add($idleRun)
-
-    $workingRun = [System.Windows.Documents.Run]::new("$dot$thinSpace$([int]$Summary.working)   ")
-    $workingRun.Foreground = $workingForeground
-    [void]$badgeText.Inlines.Add($workingRun)
-
-    $finishedRun = [System.Windows.Documents.Run]::new("$dot$thinSpace$([int]$Summary.finished)")
-    $finishedRun.Foreground = $finishedForeground
-    [void]$badgeText.Inlines.Add($finishedRun)
-}
-
 function Update-OverlayText {
-    Set-ActivityTextRuns $script:activityLabel
-    $usageLabel = if ($script:contextLabel) { "$script:contextLabel  |  Weekly $script:usageLabel" } else { "Weekly $script:usageLabel" }
-    if ($script:activityLabel) {
-        $spacer = [System.Windows.Documents.Run]::new('        ')
-        $spacer.Foreground = $overlayForeground
-        [void]$badgeText.Inlines.Add($spacer)
-    }
-    $usageRun = [System.Windows.Documents.Run]::new($usageLabel)
-    $usageRun.Foreground = $overlayForeground
-    [void]$badgeText.Inlines.Add($usageRun)
+    $badgeText.Text = if ($script:contextLabel) { "$script:contextLabel  |  Weekly $script:usageLabel" } else { "Weekly $script:usageLabel" }
 }
 
 function Update-UsageText {
@@ -371,11 +319,9 @@ function Update-ContextText {
     $strip = [CodexGroupy.UsageOverlayNativeV5]::GetProp($foreground, 'GP_LINK')
     if ($strip -eq [IntPtr]::Zero -or -not [CodexGroupy.UsageOverlayNativeV5]::IsCodeWindow($foreground)) {
         $script:contextLabel = $null
-        $script:activityLabel = $null
     }
     else {
         $script:contextLabel = Get-CodexContextLabel $foreground -AllowUiAutomation
-        $script:activityLabel = Get-ActivitySummaryForActiveStrip $foreground $strip
     }
     Update-OverlayText
 }
@@ -461,12 +407,6 @@ function Update-ContextOnForegroundChange {
     $strip = [CodexGroupy.UsageOverlayNativeV5]::GetProp($foreground, 'GP_LINK')
     $script:contextLabel = if ($strip -ne [IntPtr]::Zero -and [CodexGroupy.UsageOverlayNativeV5]::IsCodeWindow($foreground)) {
         Get-CachedCodexContextLabel $foreground
-    }
-    else {
-        $null
-    }
-    $script:activityLabel = if ($strip -ne [IntPtr]::Zero -and [CodexGroupy.UsageOverlayNativeV5]::IsCodeWindow($foreground)) {
-        Get-ActivitySummaryForActiveStrip $foreground $strip
     }
     else {
         $null

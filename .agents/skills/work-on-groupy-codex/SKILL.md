@@ -53,7 +53,7 @@ GroupySeparateWindowHotkey.ps1
   Ctrl+Shift+N duplicate workspace + physically separate into a new Groupy group.
 
 GroupyUsageOverlay.ps1
-  Active-strip context/weekly usage badge plus global white/yellow/green Codex counts.
+  Active-strip context/weekly usage badge.
 
 GroupyCodexActivityDots.ps1 -AllGroupsCached
   Yellow/green per-tab Codex activity dots across visible Groupy strips using cached rendering.
