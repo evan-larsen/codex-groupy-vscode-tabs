@@ -71,7 +71,14 @@ namespace CodexGroupy {
         public delegate void WinEventDelegate(IntPtr hook, uint eventType, IntPtr hWnd, int objectId, int childId, uint eventThread, uint eventTime);
 
         private static readonly ConcurrentDictionary<IntPtr, byte> MovingCodeWindows = new ConcurrentDictionary<IntPtr, byte>();
-        private static readonly ConcurrentDictionary<uint, string> ProcessNameById = new ConcurrentDictionary<uint, string>();
+        // Process IDs are reused after VS Code restarts. Keep this cache short-lived so a
+        // long-running overlay helper cannot mistake a new Code window for the old process
+        // that happened to own the same PID.
+        private sealed class ProcessNameCacheEntry {
+            public string Name;
+            public long CheckedAt;
+        }
+        private static readonly ConcurrentDictionary<uint, ProcessNameCacheEntry> ProcessNameById = new ConcurrentDictionary<uint, ProcessNameCacheEntry>();
         // A strip remains assigned to its group record for its lifetime. Caching that record turns
         // the hot path from a 2,000-record scan into just the handful of reads for its live tabs.
         private static readonly ConcurrentDictionary<IntPtr, long> GroupRecords = new ConcurrentDictionary<IntPtr, long>();
@@ -99,10 +106,21 @@ namespace CodexGroupy {
 
         public static bool IsCodeWindow(IntPtr hWnd) {
             uint processId; GetWindowThreadProcessId(hWnd, out processId);
+            long now = DateTime.UtcNow.Ticks;
+            ProcessNameCacheEntry cached;
+            if (ProcessNameById.TryGetValue(processId, out cached) && now - cached.CheckedAt < TimeSpan.FromSeconds(10).Ticks) {
+                return cached.Name.Equals("Code", StringComparison.OrdinalIgnoreCase) || cached.Name.Equals("Code - Insiders", StringComparison.OrdinalIgnoreCase);
+            }
             try {
-                string name = ProcessNameById.GetOrAdd(processId, id => Process.GetProcessById((int)id).ProcessName);
+                string name;
+                using (Process process = Process.GetProcessById((int)processId)) name = process.ProcessName;
+                ProcessNameById[processId] = new ProcessNameCacheEntry { Name = name, CheckedAt = now };
                 return name.Equals("Code", StringComparison.OrdinalIgnoreCase) || name.Equals("Code - Insiders", StringComparison.OrdinalIgnoreCase);
-            } catch { return false; }
+            } catch {
+                ProcessNameCacheEntry ignored;
+                ProcessNameById.TryRemove(processId, out ignored);
+                return false;
+            }
         }
         public static string ReadWindowTitle(IntPtr hWnd) {
             int length = GetWindowTextLength(hWnd);
