@@ -53,7 +53,7 @@ function Show-ProjectPicker {
     param($Config, [int]$ProjectIndex, [int]$PresetIndex, [string]$Message, [switch]$Plain)
     $preset = $Config.presets[$PresetIndex]
     $rows = @('', '  CODEX PROJECTS', '',
-        ('  Preset    A <  {0} / {1}  > D' -f $preset.name, $preset.effort), '')
+        ('  Preset    {0} / {1}' -f $preset.name, $preset.effort), '')
     # Scroll a long list to keep the selected row and footer visible.
     $visibleCount = if ($Plain) { @($Config.projects).Count } else { [Math]::Max(1, [Console]::WindowHeight - 11) }
     $first = [Math]::Max(0, $ProjectIndex - $visibleCount + 1)
