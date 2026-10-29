@@ -25,8 +25,6 @@ when changed. It does not change your execution policy.
     tether-app-branch-2
     tether-content-engine
 
-  C:\Users\evanl\Documents\tether-app
-
   W/S Move    A/D Preset    E Open    Esc Quit
 ```
 
@@ -36,7 +34,7 @@ when changed. It does not change your execution policy.
 - Esc or Ctrl+C exits.
 
 Edit `projects.json` to add/reorder absolute folder paths or change presets. Display
-names come from the last folder name; the selected full path appears underneath.
+names come from the last folder name.
 Missing folders are reported when selected. On another machine, update the paths.
 The first project is highlighted on each open; the last launched preset is saved
 outside Git at `%LOCALAPPDATA%\codex-projects\state.json`.

@@ -52,11 +52,10 @@ function Get-ProjectLaunchArguments {
 function Show-ProjectPicker {
     param($Config, [int]$ProjectIndex, [int]$PresetIndex, [string]$Message, [switch]$Plain)
     $preset = $Config.presets[$PresetIndex]
-    $selected = $Config.projects[$ProjectIndex]
     $rows = @('', '  CODEX PROJECTS', '',
         ('  Preset    A <  {0} / {1}  > D' -f $preset.name, $preset.effort), '')
     # Scroll a long list to keep the selected row and footer visible.
-    $visibleCount = if ($Plain) { @($Config.projects).Count } else { [Math]::Max(1, [Console]::WindowHeight - 13) }
+    $visibleCount = if ($Plain) { @($Config.projects).Count } else { [Math]::Max(1, [Console]::WindowHeight - 11) }
     $first = [Math]::Max(0, $ProjectIndex - $visibleCount + 1)
     $last = [Math]::Min(@($Config.projects).Count - 1, $first + $visibleCount - 1)
     for ($i = $first; $i -le $last; $i++) {
@@ -64,7 +63,7 @@ function Show-ProjectPicker {
         $marker = if ($i -eq $ProjectIndex) { '>' } else { ' ' }
         $rows += ('  {0} {1}' -f $marker, $name)
     }
-    $rows += @('', ('  {0}' -f $selected), '', '  W/S Move    A/D Preset    E Open    Esc Quit', ('  {0}' -f $Message))
+    $rows += @('', '  W/S Move    A/D Preset    E Open    Esc Quit', ('  {0}' -f $Message))
     if ($Plain) { $rows | ForEach-Object { Write-Host $_ }; return }
     [Console]::SetCursorPosition(0, 0)
     $width = [Math]::Max(1, [Console]::WindowWidth - 1)
