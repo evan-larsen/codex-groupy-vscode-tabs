@@ -20,10 +20,10 @@ when changed. It does not change your execution policy.
 
   Preset    6.1 Terra / high
 
-1     > tether-app
-2       tether-app-branch
-3       tether-app-branch-2
-4       tether-content-engine
+  1     > tether-app
+  2       tether-app-branch
+  3       tether-app-branch-2
+  4       tether-content-engine
 
   W/S Move    A/D Preset    E Open    Esc Quit
 ```

@@ -61,7 +61,7 @@ function Show-ProjectPicker {
     for ($i = $first; $i -le $last; $i++) {
         $name = Split-Path -Leaf ($Config.projects[$i].TrimEnd('\', '/'))
         $marker = if ($i -eq $ProjectIndex) { '>' } else { ' ' }
-        $rows += ('{0,-2}    {1} {2}' -f ($i + 1), $marker, $name)
+        $rows += ('  {0,-2}    {1} {2}' -f ($i + 1), $marker, $name)
     }
     $rows += @('', '  W/S Move    A/D Preset    E Open    Esc Quit', ('  {0}' -f $Message))
     if ($Plain) { $rows | ForEach-Object { Write-Host $_ }; return }
