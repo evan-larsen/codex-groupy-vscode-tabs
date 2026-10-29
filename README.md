@@ -4,6 +4,10 @@ This is a lightweight, local PowerShell helper for the specific workflow of one 
 
 For a full new-machine setup guide, including Groupy settings, startup task setup, colors, hotkeys, and troubleshooting, see [`SETUP.md`](SETUP.md).
 
+For the standalone PowerShell project picker, see [`codex-projects`](codex-projects/README.md).
+Run `codex-projects` to choose a folder with W/S, choose a Codex preset with A/D,
+and launch with E. Install once using `.\codex-projects\Install.ps1`.
+
 ## Daily runtime: one supervisor
 
 The normal setup is owned by `CodexGroupySupervisor.ps1`. It keeps the title watcher, Codex chat rename
