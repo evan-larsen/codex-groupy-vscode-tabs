@@ -6,7 +6,7 @@
     "C:\\Users\\evanl\\Documents\\tether-content-engine"
   ],
   "presets": [
-    { "name": "GPT-6.1 Terra", "model": "gpt-6.1-terra", "effort": "high" },
-    { "name": "GPT-6.1 Sol", "model": "gpt-6.1-sol", "effort": "medium" }
+    { "name": "6.1 Terra", "model": "gpt-6.1-terra", "effort": "high" },
+    { "name": "6.1 Sol", "model": "gpt-6.1-sol", "effort": "medium" }
   ]
 }

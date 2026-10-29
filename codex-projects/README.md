@@ -18,7 +18,7 @@ when changed. It does not change your execution policy.
 ```text
   CODEX PROJECTS
 
-  Preset    GPT-6.1 Terra / high
+  Preset    6.1 Terra / high
 
   > tether-app
     tether-app-branch
