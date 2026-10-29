@@ -61,9 +61,9 @@ function Show-ProjectPicker {
     for ($i = $first; $i -le $last; $i++) {
         $name = Split-Path -Leaf ($Config.projects[$i].TrimEnd('\', '/'))
         $marker = if ($i -eq $ProjectIndex) { '>' } else { ' ' }
-        $rows += ('  {0} {1}' -f $marker, $name)
+        $rows += ('  {0} {1}. {2}' -f $marker, ($i + 1), $name)
     }
-    $rows += @('', '  W/S Move    A/D Preset    E Open    Esc Quit', ('  {0}' -f $Message))
+    $rows += @('', '  1-9 Open    W/S Move    A/D Preset    E Open    Esc Quit', ('  {0}' -f $Message))
     if ($Plain) { $rows | ForEach-Object { Write-Host $_ }; return }
     [Console]::SetCursorPosition(0, 0)
     $width = [Math]::Max(1, [Console]::WindowWidth - 1)
@@ -112,6 +112,16 @@ function Start-CodexProjects {
             if ($key.Key -eq 'C' -and ($key.Modifiers -band [ConsoleModifiers]::Control)) { break }
             $action = Get-ProjectPickerAction ([string]$key.Key)
             $message = ''
+            if ([string]$key.KeyChar -match '^[1-9]$' -and
+                -not ($key.Modifiers -band ([ConsoleModifiers]::Control -bor [ConsoleModifiers]::Alt))) {
+                $numberIndex = [int]::Parse([string]$key.KeyChar) - 1
+                if ($numberIndex -lt @($config.projects).Count) {
+                    $projectIndex = $numberIndex
+                    $action = 'launch'
+                } else {
+                    $message = 'No project at that number.'
+                }
+            }
             switch ($action) {
                 'up' { $projectIndex = Get-WrappedIndex $projectIndex -1 @($config.projects).Count }
                 'down' { $projectIndex = Get-WrappedIndex $projectIndex 1 @($config.projects).Count }

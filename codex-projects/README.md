@@ -20,17 +20,19 @@ when changed. It does not change your execution policy.
 
   Preset    6.1 Terra / high
 
-  > tether-app
-    tether-app-branch
-    tether-app-branch-2
-    tether-content-engine
+  > 1. tether-app
+    2. tether-app-branch
+    3. tether-app-branch-2
+    4. tether-content-engine
 
-  W/S Move    A/D Preset    E Open    Esc Quit
+  1-9 Open    W/S Move    A/D Preset    E Open    Esc Quit
 ```
 
 - W/S or up/down arrows move through projects, wrapping at the ends.
 - A/D or left/right arrows switch presets, wrapping at the ends.
 - E or Enter starts a new Codex session in the highlighted folder.
+- Press 1-9 (number row or numpad with Num Lock on) to immediately launch that
+  numbered project with the current preset. Use W/S and E for projects beyond 9.
 - Esc or Ctrl+C exits.
 
 Edit `projects.json` to add/reorder absolute folder paths or change presets. Display
