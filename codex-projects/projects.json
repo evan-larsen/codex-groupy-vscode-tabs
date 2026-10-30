@@ -4,7 +4,7 @@
     "C:\\Users\\evanl\\Documents\\tether-app-branch",
     "C:\\Users\\evanl\\Documents\\tether-app-branch-2",
     "C:\\Users\\evanl\\Documents\\tether-content-engine",
-    { "name": "projectless", "path": "C:\\Users\\evanl" }
+    { "name": "projectless", "path": "C:\\Users\\evanl\\Documents\\Codex" }
   ],
   "presets": [
     { "name": "6.1 Terra", "model": "gpt-6.1-terra", "effort": "high" },

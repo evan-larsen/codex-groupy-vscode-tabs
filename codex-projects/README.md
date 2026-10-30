@@ -38,8 +38,10 @@ when changed. It does not change your execution policy.
 
 Edit `projects.json` to add/reorder absolute folder paths or change presets. Display
 names come from the last folder name. An entry can also be an object with `path`
-and `name` for a custom label. The final `projectless` option opens your user folder
-(`C:\Users\evanl`) for work outside a project; press 5 to launch it directly.
+and `name` for a custom label. The final `projectless` option opens Codex's
+projectless workspace root (`C:\Users\evanl\Documents\Codex`); press 5 to launch it
+directly. The desktop app creates dated, per-chat folders underneath this root;
+the CLI launcher opens the root itself.
 Missing folders are reported when selected. On another machine, update the paths.
 The first project is highlighted on each open; the last launched preset is saved
 outside Git at `%LOCALAPPDATA%\codex-projects\state.json`.
