@@ -12,9 +12,16 @@ function Read-ProjectConfig {
     if (@($config.projects).Count -eq 0 -or @($config.presets).Count -eq 0) {
         throw 'projects.json must contain at least one project and one preset.'
     }
+    $projectPaths = @()
+    $projectNames = @()
     foreach ($project in $config.projects) {
-        if ($project -isnot [string] -or [string]::IsNullOrWhiteSpace($project) -or
-            -not [IO.Path]::IsPathRooted($project)) { throw 'Project paths must be absolute folder paths.' }
+        $projectPath = if ($project -is [string]) { $project } else { $project.path }
+        if ($projectPath -isnot [string] -or [string]::IsNullOrWhiteSpace($projectPath) -or
+            -not [IO.Path]::IsPathRooted($projectPath)) { throw 'Project paths must be absolute folder paths.' }
+        $name = if ($project -isnot [string]) { $project.name } else { $null }
+        if ([string]::IsNullOrWhiteSpace($name)) { $name = Split-Path -Leaf ($projectPath.TrimEnd('\', '/')) }
+        $projectPaths += $projectPath
+        $projectNames += $name
     }
     foreach ($preset in $config.presets) {
         if ([string]::IsNullOrWhiteSpace($preset.name) -or [string]::IsNullOrWhiteSpace($preset.model) -or
@@ -22,7 +29,7 @@ function Read-ProjectConfig {
             throw 'Each preset needs a name, model, and supported effort.'
         }
     }
-    return $config
+    return [pscustomobject]@{ projects = $projectPaths; names = $projectNames; presets = @($config.presets) }
 }
 
 function Get-ProjectPickerAction {
@@ -59,7 +66,7 @@ function Show-ProjectPicker {
     $first = [Math]::Max(0, $ProjectIndex - $visibleCount + 1)
     $last = [Math]::Min(@($Config.projects).Count - 1, $first + $visibleCount - 1)
     for ($i = $first; $i -le $last; $i++) {
-        $name = Split-Path -Leaf ($Config.projects[$i].TrimEnd('\', '/'))
+        $name = $Config.names[$i]
         $marker = if ($i -eq $ProjectIndex) { '>' } else { ' ' }
         $rows += ('  {0,-2}    {1} {2}' -f ($i + 1), $marker, $name)
     }

@@ -24,6 +24,7 @@ when changed. It does not change your execution policy.
   2       tether-app-branch
   3       tether-app-branch-2
   4       tether-content-engine
+  5       projectless
 
   W/S Move    A/D Preset    E Open    Esc Quit
 ```
@@ -36,7 +37,9 @@ when changed. It does not change your execution policy.
 - Esc or Ctrl+C exits.
 
 Edit `projects.json` to add/reorder absolute folder paths or change presets. Display
-names come from the last folder name.
+names come from the last folder name. An entry can also be an object with `path`
+and `name` for a custom label. The final `projectless` option opens your user folder
+(`C:\Users\evanl`) for work outside a project; press 5 to launch it directly.
 Missing folders are reported when selected. On another machine, update the paths.
 The first project is highlighted on each open; the last launched preset is saved
 outside Git at `%LOCALAPPDATA%\codex-projects\state.json`.
