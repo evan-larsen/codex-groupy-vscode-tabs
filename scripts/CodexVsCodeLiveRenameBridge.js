@@ -3,21 +3,19 @@
  * Version-specific local bridge for the Codex VS Code extension.
  *
  * It uses VS Code's existing local Node Inspector endpoint to reach the
- * extension's already-initialized Codex app-server client.  A separately
- * started `codex app-server` can update a persisted rollout, but cannot
- * notify the already-open VS Code webview.  This bridge deliberately uses
- * that existing client instead.
+ * extension's already-initialized Codex app-server client and observe
+ * activity for the Groupy status dots.
  */
 
 'use strict';
 
 const bridgeArgs = process.argv.slice(2);
-const [operation, inspectorUrl, threadId, name] = bridgeArgs;
+const [operation, inspectorUrl] = bridgeArgs;
 const parentPidIndex = bridgeArgs.indexOf('--parent-pid');
 const parentPid = parentPidIndex >= 0 ? Number(bridgeArgs[parentPidIndex + 1]) : null;
 
-if (!['prepare', 'rename', 'watch-activity', 'trace-activity'].includes(operation) || !inspectorUrl) {
-  process.stderr.write('Usage: CodexVsCodeLiveRenameBridge.js <prepare|rename|watch-activity|trace-activity> <inspector-url> [thread-id] [name]\n');
+if (!['prepare', 'watch-activity', 'trace-activity'].includes(operation) || !inspectorUrl) {
+  process.stderr.write('Usage: CodexVsCodeLiveRenameBridge.js <prepare|watch-activity|trace-activity> <inspector-url> [--parent-pid <pid>]\n');
   process.exit(2);
 }
 
@@ -27,8 +25,12 @@ class Inspector {
     this.nextId = 1;
     this.pending = new Map();
     this.ready = new Promise((resolve, reject) => {
-      this.socket.addEventListener('open', resolve, { once: true });
-      this.socket.addEventListener('error', () => reject(new Error('Could not connect to the VS Code extension-host Inspector.')), { once: true });
+      const timeout = setTimeout(() => reject(new Error('Inspector connection timed out.')), 8000);
+      this.socket.addEventListener('open', () => { clearTimeout(timeout); resolve(); }, { once: true });
+      this.socket.addEventListener('error', () => {
+        clearTimeout(timeout);
+        reject(new Error('Could not connect to the VS Code extension-host Inspector.'));
+      }, { once: true });
     });
     this.socket.addEventListener('message', event => {
       let message;
@@ -36,6 +38,7 @@ class Inspector {
       const pending = this.pending.get(message.id);
       if (!pending) return;
       this.pending.delete(message.id);
+      clearTimeout(pending.timeout);
       if (message.error) pending.reject(new Error(message.error.message || 'Inspector request failed.'));
       else pending.resolve(message.result);
     });
@@ -45,8 +48,17 @@ class Inspector {
     await this.ready;
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.socket.send(JSON.stringify({ id, method, params }));
+      const timeout = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error('Inspector request timed out: ' + method));
+      }, 8000);
+      this.pending.set(id, { resolve, reject, timeout });
+      try { this.socket.send(JSON.stringify({ id, method, params })); }
+      catch (error) {
+        clearTimeout(timeout);
+        this.pending.delete(id);
+        reject(error);
+      }
     });
   }
 
@@ -101,55 +113,39 @@ async function prepareConnection(client) {
   return { prepared: true, processId: result.result.value.processId };
 }
 
-async function renameThroughPreparedConnection(client, requestedThreadId, requestedName) {
-  const connection = await client.call('Runtime.evaluate', { expression: 'globalThis.__codexGroupyLiveAppServerConnection' });
-  if (!connection.result?.objectId) return { ok: false, needsPrepare: true, error: 'Live connection is not prepared.' };
-
-  const callback = `function(threadId, nextName) {
-    const connection = this;
-    const providerName = 'CodexGroupyLiveRename' + Date.now() + Math.random().toString(16).slice(2);
-    const requestId = 'rename-' + Date.now();
-    return new Promise(resolve => {
-      let finished = false;
-      const registration = connection.registerProvider(providerName, {
-        onResult(message) {
-          if (finished) return;
-          finished = true;
-          registration.dispose();
-          resolve({ ok: !message.error, error: message.error?.message ?? null });
-        }
-      });
-      connection.sendRequest(providerName, requestId, 'thread/name/set', { threadId, name: nextName });
-      setTimeout(() => {
-        if (finished) return;
-        finished = true;
-        registration.dispose();
-        resolve({ ok: false, error: 'Timed out waiting for the VS Code Codex app-server response.' });
-      }, 7000);
-    });
-  }`;
-  const result = await client.call('Runtime.callFunctionOn', {
-    objectId: connection.result.objectId,
-    functionDeclaration: callback,
-    arguments: [{ value: requestedThreadId }, { value: requestedName }],
-    awaitPromise: true,
-    returnByValue: true
-  });
-  return result.result?.value ?? { ok: false, error: 'VS Code did not return a rename result.' };
-}
-
 async function installActivityRequestObserver(client, traceNotifications = false) {
   const connection = await client.call('Runtime.evaluate', { expression: 'globalThis.__codexGroupyLiveAppServerConnection' });
   if (!connection.result?.objectId) return { ok: false, needsPrepare: true, error: 'Live connection is not prepared.' };
-  const install = `function() {
+  const install = String.raw`function() {
     const connection = this;
     const key = '__codexGroupyActivityRequestState';
     let state = globalThis[key];
-    if (!state) {
-      state = { events: [], pendingByRequest: new Map(), traceNotifications: false, providerName: 'CodexGroupyActivityDots' + Date.now() + Math.random().toString(16).slice(2) };
+    if (!state || state.version !== 2 || state.connection !== connection) {
+      const previous = state?.connection && state.connection !== connection ? null : state;
+      state?.registration?.dispose();
+      state?.wake?.();
+      state = {
+        version: 2, connection, events: previous?.events ?? [],
+        pendingByRequest: previous?.pendingByRequest ?? new Map(),
+        traceNotifications: false, wake: null, overflowed: false,
+        lifecycleByThread: previous?.lifecycleByThread ?? new Map(),
+        providerName: 'CodexGroupyActivityDots' + Date.now() + Math.random().toString(16).slice(2)
+      };
       const pushEvent = event => {
-        state.events.push(event);
-        if (state.events.length > 500) state.events.splice(0, state.events.length - 500);
+        const observed = { ...event, observedAtMs: Date.now() };
+        if (event.type === 'notification' && event.threadId) {
+          state.lifecycleByThread.delete(event.threadId);
+          state.lifecycleByThread.set(event.threadId, observed);
+          if (state.lifecycleByThread.size > 500) {
+            state.lifecycleByThread.delete(state.lifecycleByThread.keys().next().value);
+          }
+        }
+        state.events.push(observed);
+        if (state.events.length > 500) {
+          state.events.shift();
+          state.overflowed = true;
+        }
+        state.wake?.();
       };
       const kindFor = request => {
         const method = String(request?.method || '');
@@ -201,7 +197,7 @@ async function installActivityRequestObserver(client, traceNotifications = false
       globalThis[key] = state;
     }
     state.traceNotifications = state.traceNotifications || ${traceNotifications ? 'true' : 'false'};
-    return { ok: true, pending: Array.from(state.pendingByRequest.values()) };
+    return { ok: true, pending: Array.from(state.pendingByRequest.values()), lifecycle: Array.from(state.lifecycleByThread.values()) };
   }`;
   const result = await client.call('Runtime.callFunctionOn', {
     objectId: connection.result.objectId,
@@ -212,13 +208,32 @@ async function installActivityRequestObserver(client, traceNotifications = false
   return result.result?.value ?? { ok: false, error: 'VS Code did not return an activity-observer result.' };
 }
 
-async function drainActivityRequestEvents(client) {
+async function waitForActivityRequestEvents(client) {
   const result = await client.call('Runtime.evaluate', {
     expression: `(() => {
       const state = globalThis.__codexGroupyActivityRequestState;
       if (!state) return { ok: false, error: 'Activity observer is not installed.' };
-      return { ok: true, events: state.events.splice(0), pending: Array.from(state.pendingByRequest.values()) };
+      const drain = () => {
+        const queued = state.events.splice(0);
+        const events = state.overflowed ? Array.from(state.lifecycleByThread.values()) : queued;
+        state.overflowed = false;
+        return { ok: true, events, pending: Array.from(state.pendingByRequest.values()) };
+      };
+      if (state.events.length) return drain();
+      return new Promise(resolve => {
+        let batch;
+        const finish = () => {
+          clearTimeout(timeout);
+          clearTimeout(batch);
+          if (state.wake === wake) state.wake = null;
+          resolve(drain());
+        };
+        const wake = () => { if (!batch) batch = setTimeout(finish, 25); };
+        const timeout = setTimeout(finish, 4000);
+        state.wake = wake;
+      });
     })()`,
+    awaitPromise: true,
     returnByValue: true
   });
   return result.result?.value ?? { ok: false, error: 'Could not read activity-request events.' };
@@ -229,29 +244,33 @@ async function watchActivityRequests(client, traceNotifications = false) {
   if (!prepared.prepared) throw new Error(prepared.reason || 'Could not prepare the live Codex connection.');
   const installed = await installActivityRequestObserver(client, traceNotifications);
   if (!installed.ok) throw new Error(installed.error || 'Could not install the live activity observer.');
-  process.stdout.write(`${JSON.stringify({ type: 'ready', pending: installed.pending ?? [], processId: prepared.processId ?? null })}\n`);
-  while (true) {
-    await new Promise(resolve => setTimeout(resolve, 175));
-    if (Number.isInteger(parentPid) && parentPid > 0) {
-      try { process.kill(parentPid, 0); } catch { return; }
+  process.stdout.write(`${JSON.stringify({ type: 'ready', pending: installed.pending ?? [], lifecycle: installed.lifecycle ?? [], processId: prepared.processId ?? null })}\n`);
+  const parentCheck = setInterval(() => {
+    if (!Number.isInteger(parentPid) || parentPid <= 0) return;
+    try { process.kill(parentPid, 0); } catch { process.exit(0); }
+  }, 1000);
+  parentCheck.unref();
+  try {
+    let pendingSignature = JSON.stringify(installed.pending ?? []);
+    while (true) {
+      const update = await waitForActivityRequestEvents(client);
+      if (!update.ok) throw new Error(update.error || 'The live activity observer was removed.');
+      const signature = JSON.stringify(update.pending ?? []);
+      if (update.events?.length || signature !== pendingSignature) {
+        process.stdout.write(JSON.stringify({ type: 'activity-batch', events: update.events ?? [], pending: update.pending ?? [] }) + '\n');
+      }
+      pendingSignature = signature;
     }
-    const update = await drainActivityRequestEvents(client);
-    if (!update.ok) throw new Error(update.error || 'The live activity observer was removed.');
-    for (const event of update.events ?? []) process.stdout.write(`${JSON.stringify(event)}\n`);
+  } finally {
+    clearInterval(parentCheck);
   }
 }
 
 async function main() {
   const client = new Inspector(inspectorUrl);
   try {
-    let result;
     if (operation === 'prepare') {
-      result = await prepareConnection(client);
-      process.stdout.write(`${JSON.stringify(result)}\n`);
-      process.exitCode = result.ok === false ? 1 : 0;
-    } else if (operation === 'rename') {
-      if (!threadId || name == null) throw new Error('Rename requires both a thread id and a title.');
-      result = await renameThroughPreparedConnection(client, threadId, name);
+      const result = await prepareConnection(client);
       process.stdout.write(`${JSON.stringify(result)}\n`);
       process.exitCode = result.ok === false ? 1 : 0;
     } else {

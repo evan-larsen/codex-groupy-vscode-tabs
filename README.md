@@ -1,4 +1,4 @@
-# Codex → Groupy Tab Sync (proof of concept)
+# Codex â†’ Groupy Tab Sync (proof of concept)
 
 This is a lightweight, local PowerShell helper for the specific workflow of one Codex conversation per VS Code window, grouped into tabs by Groupy 2.
 
@@ -10,9 +10,13 @@ and launch with E. Install once using `.\codex-projects\Install.ps1`.
 
 ## Daily runtime: one supervisor
 
-The normal setup is owned by `CodexGroupySupervisor.ps1`. It keeps the title watcher, Codex chat rename
-hotkey, Chrome-style tab-number shortcuts, separate-group shortcut, usage/context overlay, and cached
-all-groups Codex activity dots running as quiet background helpers.
+The normal setup is owned by `CodexGroupySupervisor.ps1`. It keeps the title watcher,
+Chrome-style tab-number shortcuts, separate-group shortcut, usage/context overlay, and cached
+all-groups Codex activity dots running as quiet background helpers. A shared background index
+maps chat titles and thread IDs to session files for the dots and usage badge. It watches for
+title and file changes and publishes a local lookup snapshot in work/CodexSessionLookup.json.
+The overlays read this snapshot off their UI threads. The usage badge follows the caption
+produced by title sync and shows only quota usage when that caption cannot be resolved.
 
 The supervisor also reloads an individual helper after one of its local runtime inputs changes. In
 particular, the activity-dot helper is relaunched when its PowerShell script or live-Codex bridge is updated,
@@ -45,25 +49,6 @@ Remove that startup task:
 ```powershell
 .\scripts\CodexGroupySupervisor.ps1 -UninstallStartupTask
 ```
-
-## Codex chat rename: Ctrl+Shift+R
-
-`CodexChatRenameHotkey.ps1` preserves the fast textbox and now includes a version-specific live VS Code bridge.
-The bridge reaches the extension's already-running Codex app-server connection instead of starting a separate
-app-server process, which is required for the open VS Code client to receive its `thread/name/updated` event.
-If VS Code is not exposing a live Inspector endpoint, the helper falls back to a detached persisted-name update
-and still updates the native window title immediately.
-
-The local `session_index.jsonl` is append-only, so historical revisions of the same chat are not treated as duplicate chats by this helper. Genuine simultaneous chats with the same title are still rejected safely.
-
-Test it once while a Codex view is open in VS Code:
-
-```powershell
-.\scripts\CodexChatRenameHotkey.ps1 -TestCurrent
-```
-
-The helper deliberately declines to rename the home/new-chat screen. It also declines when two saved chats
-have the identical title, so it can never guess which duplicate should change.
 
 ## Findings from this machine
 
@@ -127,6 +112,12 @@ When you navigate to Codex's home/new-chat screen or close the Codex webview, th
 ```powershell
 .\scripts\CodexGroupyTabSync.ps1 -WatchAutoTitle -CodexHomeTitle 'Codex: choose a chat' -CodexClosedTitle 'VS Code'
 ```
+
+Auto-title mode reuses the last workspace name, batches foreground changes for 250 ms, and checks again after eight seconds if there are no events. Accessibility scans run in a separate process. If a scan exceeds three seconds, the watcher keeps the current caption and waits at least five seconds before retrying. Consecutive scan failures increase that delay up to one minute.
+
+Caption changes record timing in work/CodexGroupyTabSyncRuntime.log. The activity bridge wakes the
+overlay on lifecycle notifications, and uses a four-second timed wait as a fallback. Visible activity
+updates record event-to-render timing in work/ActivityDotsRuntime.log.
 
 ## Chrome-style Ctrl+1 through Ctrl+9 for the current Groupy / VS Code group
 
@@ -247,7 +238,7 @@ Open a separate Windows PowerShell window in this folder and run:
 .\scripts\GroupyUsageOverlay.ps1
 ```
 
-Expected badge text is similar to `Context 78% left  |  Weekly 91%  ·  5d 16h`.
+Expected badge text is similar to `Context 78% left  |  Weekly 91%  Â·  5d 16h`.
 `Context` is the active chat's model-context percentage remaining (so higher is better); the final
 weekly value shows whole days and hours until renewal (or `<1h` in the final hour). The overlay uses normal-weight
 `Segoe UI` text in `#dcdcdc` to remain subtle against the Groupy strip.

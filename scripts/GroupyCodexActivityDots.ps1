@@ -223,21 +223,59 @@ namespace CodexGroupy {
 '@
 }
 
-if (-not ('CodexGroupy.ActivityBridgeProcessV1' -as [type])) {
-    Add-Type -TypeDefinition @'
+if (-not ('CodexGroupy.ActivityBridgeProcessV2' -as [type])) {
+    Add-Type -ReferencedAssemblies System, WindowsBase -TypeDefinition @'
 using System;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.IO;
+using System.Threading;
+using System.Windows.Threading;
 
 namespace CodexGroupy {
-    public sealed class ActivityBridgeProcessV1 : IDisposable {
+    public sealed class SessionFileSignal : IDisposable {
+        private readonly FileSystemWatcher watcher;
+        private int dirty;
+
+        public SessionFileSignal(string root) {
+            watcher = new FileSystemWatcher(root, "*.jsonl") {
+                IncludeSubdirectories = true,
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size
+            };
+            watcher.Changed += (sender, args) => Interlocked.Exchange(ref dirty, 1);
+            watcher.Created += (sender, args) => Interlocked.Exchange(ref dirty, 1);
+            watcher.Renamed += (sender, args) => Interlocked.Exchange(ref dirty, 1);
+            watcher.Deleted += (sender, args) => Interlocked.Exchange(ref dirty, 1);
+            watcher.Error += (sender, args) => Interlocked.Exchange(ref dirty, 1);
+            watcher.EnableRaisingEvents = true;
+        }
+
+        public bool Consume() { return Interlocked.Exchange(ref dirty, 0) != 0; }
+        public void Dispose() { watcher.Dispose(); }
+    }
+
+    public sealed class ActivityBridgeProcessV2 : IDisposable {
         private readonly ConcurrentQueue<string> lines = new ConcurrentQueue<string>();
         private readonly Process process;
+        private readonly Dispatcher dispatcher;
+        private readonly Action onActivity;
+        private int wakeQueued;
+        private volatile bool disposed;
+
+        private void ScheduleWake() {
+            if (disposed || dispatcher.HasShutdownStarted || Interlocked.Exchange(ref wakeQueued, 1) != 0) return;
+            dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => {
+                Interlocked.Exchange(ref wakeQueued, 0);
+                if (!disposed) onActivity();
+            }));
+        }
 
         private static string Quote(string value) {
             return "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
         }
-        public ActivityBridgeProcessV1(string nodePath, string bridgePath, string inspectorUrl, string operation) {
+        public ActivityBridgeProcessV2(string nodePath, string bridgePath, string inspectorUrl, string operation, Dispatcher dispatcher, Action onActivity) {
+            this.dispatcher = dispatcher;
+            this.onActivity = onActivity;
             var startInfo = new ProcessStartInfo {
                 FileName = nodePath,
                 Arguments = Quote(bridgePath) + " " + operation + " " + Quote(inspectorUrl) + " --parent-pid " + Process.GetCurrentProcess().Id,
@@ -247,8 +285,13 @@ namespace CodexGroupy {
                 RedirectStandardError = true
             };
             process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-            process.OutputDataReceived += (sender, args) => { if (!String.IsNullOrWhiteSpace(args.Data)) lines.Enqueue(args.Data); };
-            process.ErrorDataReceived += (sender, args) => { if (!String.IsNullOrWhiteSpace(args.Data)) lines.Enqueue("# bridge-error: " + args.Data); };
+            process.OutputDataReceived += (sender, args) => {
+                if (!String.IsNullOrWhiteSpace(args.Data)) { lines.Enqueue(args.Data); ScheduleWake(); }
+            };
+            process.ErrorDataReceived += (sender, args) => {
+                if (!String.IsNullOrWhiteSpace(args.Data)) { lines.Enqueue("# bridge-error: " + args.Data); ScheduleWake(); }
+            };
+            process.Exited += (sender, args) => ScheduleWake();
             if (!process.Start()) throw new InvalidOperationException("Could not start the live Codex activity bridge.");
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
@@ -261,7 +304,7 @@ namespace CodexGroupy {
             return result.ToArray();
         }
         public void Stop() { if (!process.HasExited) process.Kill(); }
-        public void Dispose() { process.Dispose(); }
+        public void Dispose() { disposed = true; process.Dispose(); }
     }
 }
 '@
@@ -346,45 +389,18 @@ namespace CodexGroupy {
 '@
 }
 
-$sessionIndexPath = Join-Path $env:USERPROFILE '.codex\session_index.jsonl'
 $sessionsRoot = Join-Path $env:USERPROFILE '.codex\sessions'
-
-function Resolve-RipgrepPath {
-    # The logon task does not inherit VS Code's extension PATH.  Prefer a PATH copy for
-    # development, but locate the extension-bundled binary directly for unattended startup.
-    $command = Get-Command rg.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $command) {
-        $command = Get-Command rg -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    }
-    if ($command) { return $command.Source }
-
-    $extensionsRoot = Join-Path $env:USERPROFILE '.vscode\extensions'
-    if (Test-Path -LiteralPath $extensionsRoot) {
-        $extensions = @(Get-ChildItem -LiteralPath $extensionsRoot -Directory -Filter 'openai.chatgpt-*' -ErrorAction SilentlyContinue |
-            Sort-Object LastWriteTimeUtc -Descending)
-        foreach ($extension in $extensions) {
-            $bundled = Get-ChildItem -LiteralPath (Join-Path $extension.FullName 'bin') -Recurse -File -Filter 'rg.exe' -ErrorAction SilentlyContinue |
-                Select-Object -First 1
-            if ($bundled) { return $bundled.FullName }
-        }
-    }
-
-    throw 'Could not find rg.exe. Install or reload the ChatGPT/Codex VS Code extension, then restart the Codex/Groupy supervisor.'
-}
-
-$script:rgPath = Resolve-RipgrepPath
-$script:sessionIndexTicks = -1L
-$script:logByTitle = @{}
-$script:logPathByThreadId = @{}
-$script:nextLogLookupAt = @{}
+. (Join-Path $PSScriptRoot 'CodexGroupySessionLookup.ps1')
+$script:sessionLookup = New-CodexGroupySessionLookup
+$script:sessionSnapshot = $null
 $script:activityByLog = @{}
-$script:chatByWindow = @{}
 $script:displayActivityByWindow = @{}
 $script:latestLifecycleByWindow = @{}
 $script:groupyController = $null
 $script:overlaysByStrip = @{}
 $script:activityBridges = @{}
 $script:liveActivityByThread = @{}
+$script:activityLatencyByThread = @{}
 $script:pendingRequestsByKey = @{}
 $script:liveNotificationSignatures = @{}
 $script:lastActivityBridgeDiscoveryAt = [DateTime]::MinValue
@@ -407,10 +423,7 @@ $script:unmappedWorkingRetryUntil = [DateTime]::MinValue
 $script:nextUnmappedWorkingRetryAt = [DateTime]::MinValue
 $script:lastForegroundHandleRaw = 0L
 $script:sessionFileWatcher = $null
-$script:sessionFileWatcherSubscriptions = @()
-$script:sessionFileWatcherSourcePrefix = "CodexActivityDotsSessionFile:$PID"
 $script:sessionFileDirty = $false
-$script:lastSessionFileEventAt = [DateTime]::MinValue
 $script:lastSessionFileRenderAt = [DateTime]::MinValue
 $script:lastSessionWatcherDiagnostic = $null
 $script:lastMoveActive = $false
@@ -475,116 +488,41 @@ function Publish-ActivitySummary {
     }
 }
 
-function Start-ActivitySessionFileWatcher {
-    if (-not $AllGroupsCached) { return }
-    if ($script:sessionFileWatcher) { return }
-    if (-not (Test-Path -LiteralPath $sessionsRoot)) { return }
-    try {
-        $watcher = [System.IO.FileSystemWatcher]::new($sessionsRoot, '*.jsonl')
-        $watcher.IncludeSubdirectories = $true
-        $watcher.NotifyFilter = [System.IO.NotifyFilters]'FileName, LastWrite, Size'
-        $script:sessionFileWatcherSubscriptions = @(
-            Register-ObjectEvent -InputObject $watcher -EventName Changed -SourceIdentifier "$($script:sessionFileWatcherSourcePrefix):Changed"
-            Register-ObjectEvent -InputObject $watcher -EventName Created -SourceIdentifier "$($script:sessionFileWatcherSourcePrefix):Created"
-            Register-ObjectEvent -InputObject $watcher -EventName Renamed -SourceIdentifier "$($script:sessionFileWatcherSourcePrefix):Renamed"
-        )
-        $watcher.EnableRaisingEvents = $true
-        $script:sessionFileWatcher = $watcher
-        Write-ActivityDiagnostic "session-watcher enabled root=$sessionsRoot"
-    }
-    catch {
-        $signature = $_.Exception.Message
-        if ($signature -ne $script:lastSessionWatcherDiagnostic) {
-            $script:lastSessionWatcherDiagnostic = $signature
-            Write-ActivityDiagnostic "session-watcher unavailable: $signature"
-        }
-    }
-}
-
 function Update-SessionFileDirtyState {
     if (-not $AllGroupsCached) { return }
-    if (Test-LiveLifecycleBridgeReady) { return }
-    Start-ActivitySessionFileWatcher
-    $events = @(Get-Event -ErrorAction SilentlyContinue | Where-Object { $_.SourceIdentifier -like "$($script:sessionFileWatcherSourcePrefix):*" })
-    if ($events.Count -gt 0) {
-        foreach ($event in $events) {
-            try { Remove-Event -EventIdentifier $event.EventIdentifier -ErrorAction SilentlyContinue } catch {}
+    if (Test-LiveLifecycleBridgeReady) {
+        if ($script:sessionFileWatcher) {
+            $script:sessionFileWatcher.Dispose()
+            $script:sessionFileWatcher = $null
         }
-        $script:sessionFileDirty = $true
-        $script:lastSessionFileEventAt = Get-Date
+        return
     }
-    if (-not $script:sessionFileDirty) { return }
+    if (-not $script:sessionFileWatcher -and (Test-Path -LiteralPath $sessionsRoot)) {
+        try { $script:sessionFileWatcher = [CodexGroupy.SessionFileSignal]::new($sessionsRoot) }
+        catch {
+            $signature = $_.Exception.Message
+            if ($signature -ne $script:lastSessionWatcherDiagnostic) {
+                $script:lastSessionWatcherDiagnostic = $signature
+                Write-ActivityDiagnostic "session-watcher unavailable: $signature"
+            }
+        }
+    }
+    if ($script:sessionFileWatcher -and $script:sessionFileWatcher.Consume()) { $script:sessionFileDirty = $true }
     $now = Get-Date
-    if (($now - $script:lastSessionFileEventAt).TotalMilliseconds -lt 150) { return }
-    if (($now - $script:lastSessionFileRenderAt).TotalMilliseconds -lt 1500) { return }
-    $script:sessionFileDirty = $false
-    $script:lastSessionFileRenderAt = $now
-    Set-AllActivityStripsDirty 'session-file'
-}
-
-function ConvertTo-CodexTitleKey([string]$Title) {
-    if ([string]::IsNullOrWhiteSpace($Title)) { return $null }
-    $clean = ($Title -replace '[\r\n\t]+', ' ' -replace '\s{2,}', ' ').Trim()
-    if ($clean.Length -gt 120) { $clean = $clean.Substring(0, 117).TrimEnd() + '...' }
-    return $clean
+    $elapsed = ($now - $script:lastSessionFileRenderAt).TotalSeconds
+    if (($script:sessionFileDirty -and $elapsed -ge 1.5) -or $elapsed -ge 8) {
+        $script:sessionFileDirty = $false
+        $script:lastSessionFileRenderAt = $now
+        Set-AllActivityStripsDirty 'session-file'
+    }
 }
 
 function Update-CodexSessionMap {
-    if (-not (Test-Path -LiteralPath $sessionIndexPath)) { return }
-    $indexItem = Get-Item -LiteralPath $sessionIndexPath
-    if ($script:sessionIndexTicks -eq $indexItem.LastWriteTimeUtc.Ticks) { return }
-
-    $latestById = @{}
-    foreach ($line in Get-Content -LiteralPath $sessionIndexPath) {
-        try { $entry = $line | ConvertFrom-Json -ErrorAction Stop } catch { continue }
-        if (-not $entry.id -or -not $entry.PSObject.Properties['thread_name']) { continue }
-        $latestById[[string]$entry.id] = $entry
+    $snapshot = $script:sessionLookup.GetSnapshot()
+    if (-not [object]::ReferenceEquals($snapshot, $script:sessionSnapshot)) {
+        $script:sessionSnapshot = $snapshot
+        Set-AllActivityStripsDirty 'session-index'
     }
-
-    $candidatesByTitle = @{}
-    foreach ($entry in $latestById.Values) {
-        $title = ConvertTo-CodexTitleKey ([string]$entry.thread_name)
-        if (-not $title) { continue }
-        if (-not $candidatesByTitle.ContainsKey($title)) { $candidatesByTitle[$title] = [Collections.Generic.List[object]]::new() }
-        $candidatesByTitle[$title].Add($entry)
-    }
-
-    $previous = $script:logByTitle
-    $resolved = @{}
-    foreach ($title in $candidatesByTitle.Keys) {
-        $candidates = $candidatesByTitle[$title]
-        if ($candidates.Count -ne 1) { continue }
-        $id = [string]$candidates[0].id
-        # Do not recursively search the session tree for every indexed chat here. On a large
-        # history that turns a tiny session-index update into minutes of synchronous filesystem
-        # work. The specific visible window resolves its one log lazily below.
-        $knownPath = if ($script:logPathByThreadId.ContainsKey($id)) { $script:logPathByThreadId[$id] } elseif ($previous.ContainsKey($title) -and $previous[$title].ThreadId -eq $id) { $previous[$title].LogPath } else { $null }
-        $resolved[$title] = [pscustomobject]@{ ThreadId = $id; LogPath = $knownPath }
-    }
-    $script:logByTitle = $resolved
-    $script:sessionIndexTicks = $indexItem.LastWriteTimeUtc.Ticks
-}
-
-function Resolve-CodexSessionLogPath([string]$ThreadId) {
-    if (-not $ThreadId) { return $null }
-    if ($script:logPathByThreadId.ContainsKey($ThreadId)) { return $script:logPathByThreadId[$ThreadId] }
-    $now = Get-Date
-    if ($script:nextLogLookupAt.ContainsKey($ThreadId) -and $script:nextLogLookupAt[$ThreadId] -gt $now) { return $null }
-    try {
-        # rg's native file walker finds one known rollout filename in milliseconds; PowerShell's
-        # recursive provider enumeration is dramatically slower on a long Codex session history.
-        $path = @(& $script:rgPath --files $sessionsRoot -g "*$ThreadId.jsonl" 2>$null | Select-Object -First 1)[0]
-        if ($path -and (Test-Path -LiteralPath $path)) {
-            $script:logPathByThreadId[$ThreadId] = $path
-            return $path
-        }
-    }
-    finally {
-        # A newly created rollout may not be flushed to disk yet. Retry it occasionally, never on
-        # every 350 ms visual tick.
-        $script:nextLogLookupAt[$ThreadId] = $now.AddSeconds(5)
-    }
-    return $null
 }
 
 function Get-ActivityState([string]$LogPath) {
@@ -691,33 +629,12 @@ function Get-DisplayActivityState([IntPtr]$Handle, [object]$Chat) {
 }
 
 function Resolve-CodexChatForWindow([IntPtr]$Handle) {
-    $key = $Handle.ToInt64().ToString('X')
     $caption = [CodexGroupy.ActivityDotsNativeV1]::ReadWindowTitle($Handle)
-    $title = ConvertTo-CodexTitleKey $caption
-    if ($title -and $script:logByTitle.ContainsKey($title)) {
-        $chat = $script:logByTitle[$title]
-        if (-not $chat.LogPath) { $chat.LogPath = Resolve-CodexSessionLogPath $chat.ThreadId }
-        if ($chat.LogPath) {
-            $script:chatByWindow[$key] = $chat
-            return $chat
-        }
-        return $null
-    }
-    # The title watcher intentionally labels these explicit non-chat states. Clear a prior cached
-    # chat only for those known state changes; editor captions during a tab switch are transient.
-    if ($title -match '(?i)\s-\sCodex\s+(home|closed)$') {
-        $script:chatByWindow.Remove($key)
-        return $null
-    }
-    # An unresolved caption must never inherit the prior chat's indicator. A brief missing dot
-    # during VS Code's own caption refresh is preferable to displaying activity for the wrong tab.
-    $script:chatByWindow.Remove($key)
-    return $null
+    return $script:sessionSnapshot.FindByTitle($caption)
 }
 
 function Get-CodexExtensionHostInspectorUrls {
     # VS Code 1.131 exposes extension hosts as NodeService utility processes. Their local
-    # Inspector endpoint is also what the rename helper uses to reach the live app-server client.
     $cachedUrls = [Collections.Generic.List[string]]::new()
     if (Test-Path -LiteralPath $script:inspectorCachePath) {
         try {
@@ -784,21 +701,19 @@ function Get-CodexExtensionHostInspectorUrls {
     return $result
 }
 
-function Remove-BridgePendingRequests([string]$BridgeUrl) {
-    $keys = @($script:pendingRequestsByKey.Keys | Where-Object { $_.StartsWith("$BridgeUrl|") })
-    foreach ($key in $keys) { $script:pendingRequestsByKey.Remove($key) }
-}
-
 function Start-ActivityBridge([string]$BridgeUrl) {
-    $node = Get-Command node -CommandType Application -ErrorAction Stop
+    $node = Get-Command node.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
     $bridge = Join-Path $PSScriptRoot 'CodexVsCodeLiveRenameBridge.js'
     if (-not (Test-Path -LiteralPath $bridge)) { throw "Missing live Codex bridge: $bridge" }
     $operation = if ($DisableLiveLifecycleBridge) { 'watch-activity' } else { 'trace-activity' }
-    $process = [CodexGroupy.ActivityBridgeProcessV1]::new($node.Source, $bridge, $BridgeUrl, $operation)
+    $dispatcher = [System.Windows.Threading.Dispatcher]::CurrentDispatcher
+    $process = [CodexGroupy.ActivityBridgeProcessV2]::new(
+        $node.Source, $bridge, $BridgeUrl, $operation, $dispatcher, [Action]{ Invoke-ActivityUpdate }
+    )
     $script:activityBridges[$BridgeUrl] = [pscustomobject]@{ Process = $process; Ready = $false }
 }
 
-function Set-LiveThreadActivity([string]$ThreadId, [string]$State, [object]$TurnId) {
+function Set-LiveThreadActivity([string]$ThreadId, [string]$State, [object]$TurnId, [long]$ObservedAtMs) {
     if (-not $ThreadId -or -not $State) { return }
     $existing = if ($script:liveActivityByThread.ContainsKey($ThreadId)) { $script:liveActivityByThread[$ThreadId] } else { $null }
     $completedId = if ($State -eq 'finished') {
@@ -813,11 +728,14 @@ function Set-LiveThreadActivity([string]$ThreadId, [string]$State, [object]$Turn
     $script:liveActivityByThread[$ThreadId] = [pscustomobject]@{
         State = $State
         CompletedTurnId = $completedId
-        UpdatedAt = Get-Date
+        UpdatedAt = if ($ObservedAtMs -gt 0) { [DateTimeOffset]::FromUnixTimeMilliseconds($ObservedAtMs).LocalDateTime } else { Get-Date }
     }
     if ($AllGroupsCached -and $State -eq 'working' -and -not $script:stripKeysByThread.ContainsKey($ThreadId)) {
         $script:unmappedWorkingRetryUntil = (Get-Date).AddSeconds(10)
         $script:nextUnmappedWorkingRetryAt = [DateTime]::MinValue
+    }
+    if ($ObservedAtMs -gt 0 -and ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $ObservedAtMs) -le 60000) {
+        $script:activityLatencyByThread[$ThreadId] = $ObservedAtMs
     }
     Set-ActivityThreadDirty $ThreadId "live-thread:$ThreadId"
     Write-ActivityDiagnostic "live-thread thread=$ThreadId state=$State turn=$(if ($TurnId) { $TurnId } else { '<none>' })"
@@ -826,6 +744,7 @@ function Set-LiveThreadActivity([string]$ThreadId, [string]$State, [object]$Turn
 function Update-LiveThreadActivityFromNotification([object]$Message) {
     if (-not $Message.threadId -or -not $Message.method) { return }
     $method = [string]$Message.method
+    $observedAtMs = if ($Message.PSObject.Properties['observedAtMs']) { [long]$Message.observedAtMs } else { 0L }
     $turnId = if ($Message.PSObject.Properties['turnId'] -and $Message.turnId) { $Message.turnId } else { $null }
     $status = ''
     if ($Message.PSObject.Properties['status'] -and $Message.status) {
@@ -841,29 +760,43 @@ function Update-LiveThreadActivityFromNotification([object]$Message) {
         }
     }
     switch -Regex ($method) {
-        '^(turn|task)/started$' { Set-LiveThreadActivity ([string]$Message.threadId) 'working' $turnId; break }
-        '^(turn|task)/(completed|complete)$' { Set-LiveThreadActivity ([string]$Message.threadId) 'finished' $turnId; break }
-        '^(turn|task)/(aborted|cancelled|canceled|failed|error)$' { Set-LiveThreadActivity ([string]$Message.threadId) 'stopped' $turnId; break }
+        '^(turn|task)/started$' { Set-LiveThreadActivity ([string]$Message.threadId) 'working' $turnId $observedAtMs; break }
+        '^(turn|task)/(completed|complete)$' { Set-LiveThreadActivity ([string]$Message.threadId) 'finished' $turnId $observedAtMs; break }
+        '^(turn|task)/(aborted|cancelled|canceled|failed|error)$' { Set-LiveThreadActivity ([string]$Message.threadId) 'stopped' $turnId $observedAtMs; break }
         '^thread/status/(updated|changed)$' {
-            if ($status -eq 'active') { Set-LiveThreadActivity ([string]$Message.threadId) 'working' $turnId }
-            elseif ($status -in @('idle', 'systemError', 'notLoaded')) { Set-LiveThreadActivity ([string]$Message.threadId) 'finished' $turnId }
+            if ($status -eq 'active') { Set-LiveThreadActivity ([string]$Message.threadId) 'working' $turnId $observedAtMs }
+            elseif ($status -in @('idle', 'systemError', 'notLoaded')) { Set-LiveThreadActivity ([string]$Message.threadId) 'finished' $turnId $observedAtMs }
             break
         }
     }
 }
 
+function Update-BridgePendingSnapshot([string]$BridgeUrl, [object[]]$Pending) {
+    if (-not $EnableNeedsUserBridge) { return }
+    $next = @{}
+    foreach ($request in $Pending) {
+        if (-not $request.threadId -or -not $request.requestId) { continue }
+        $key = "$BridgeUrl|$($request.requestId)"
+        $next[$key] = $true
+        if (-not $script:pendingRequestsByKey.ContainsKey($key)) {
+            $script:pendingRequestsByKey[$key] = [pscustomobject]@{ ThreadId = [string]$request.threadId; Kind = [string]$request.kind }
+            Set-ActivityThreadDirty ([string]$request.threadId) 'request-pending'
+        }
+    }
+    foreach ($key in @($script:pendingRequestsByKey.Keys)) {
+        if (-not $key.StartsWith("$BridgeUrl|") -or $next.ContainsKey($key)) { continue }
+        $request = $script:pendingRequestsByKey[$key]
+        $script:pendingRequestsByKey.Remove($key)
+        Set-ActivityThreadDirty $request.ThreadId 'request-resolved'
+    }
+}
+
 function Read-ActivityBridgeOutput {
+    $hadReadyBridge = Test-LiveLifecycleBridgeReady
     foreach ($bridgeUrl in @($script:activityBridges.Keys)) {
         $bridge = $script:activityBridges[$bridgeUrl]
         $process = $bridge.Process
-        if ($process.HasExited) {
-            Remove-BridgePendingRequests $bridgeUrl
-            $process.Dispose()
-            $script:activityBridges.Remove($bridgeUrl)
-            continue
-        }
         foreach ($line in $process.Drain()) {
-            if ([string]::IsNullOrWhiteSpace($line)) { continue }
             if ($line.StartsWith('# bridge-error:')) {
                 Write-ActivityDiagnostic $line
                 continue
@@ -871,22 +804,27 @@ function Read-ActivityBridgeOutput {
             try { $message = $line | ConvertFrom-Json -ErrorAction Stop } catch { continue }
             if ($message.type -eq 'ready') {
                 $bridge.Ready = $true
-                Remove-BridgePendingRequests $bridgeUrl
-                foreach ($pending in @($message.pending)) {
-                    if (-not $pending.threadId -or -not $pending.requestId) { continue }
-                    $script:pendingRequestsByKey["$bridgeUrl|$($pending.requestId)"] = [pscustomobject]@{ ThreadId = [string]$pending.threadId; Kind = [string]$pending.kind }
+                Update-BridgePendingSnapshot $bridgeUrl @($message.pending)
+                foreach ($event in @($message.lifecycle)) { Update-LiveThreadActivityFromNotification $event }
+                Write-ActivityDiagnostic 'activity-bridge ready'
+                Set-AllActivityStripsDirty 'bridge-ready'
+            }
+            elseif ($message.type -eq 'activity-batch') {
+                Update-BridgePendingSnapshot $bridgeUrl @($message.pending)
+                foreach ($event in @($message.events)) {
+                    if ($event.type -eq 'notification') { Update-LiveThreadActivityFromNotification $event }
                 }
             }
-            elseif ($message.type -eq 'pending' -and $message.threadId -and $message.requestId) {
-                $script:pendingRequestsByKey["$bridgeUrl|$($message.requestId)"] = [pscustomobject]@{ ThreadId = [string]$message.threadId; Kind = [string]$message.kind }
-            }
-            elseif ($message.type -eq 'resolved' -and $message.requestId) {
-                $script:pendingRequestsByKey.Remove("$bridgeUrl|$($message.requestId)")
-            }
-            elseif ($message.type -eq 'notification') {
-                Update-LiveThreadActivityFromNotification $message
-            }
         }
+        if ($process.HasExited) {
+            Update-BridgePendingSnapshot $bridgeUrl @()
+            $process.Dispose()
+            $script:activityBridges.Remove($bridgeUrl)
+        }
+    }
+    if ($hadReadyBridge -and -not (Test-LiveLifecycleBridgeReady)) {
+        $script:liveActivityByThread.Clear()
+        Set-AllActivityStripsDirty 'bridge-disconnected'
     }
 }
 
@@ -927,7 +865,9 @@ function Get-GroupyTabs([IntPtr]$Strip) {
 }
 
 if ($Inspect) {
-    Update-CodexSessionMap
+    [void]$script:sessionLookup.GetSnapshot()
+    Start-Sleep -Milliseconds 500
+    $script:sessionSnapshot = $script:sessionLookup.GetSnapshot()
     $foreground = [CodexGroupy.ActivityDotsNativeV1]::GetForegroundWindow()
     if (-not $AllGroups -and -not [CodexGroupy.ActivityDotsNativeV1]::IsCodeWindow($foreground)) {
         Write-Output 'Foreground window is not VS Code.'
@@ -1324,6 +1264,14 @@ function Update-ActivityDots {
             if ($AllGroupsCached) {
                 $reason = $script:dirtyActivityStrips[$key]
                 $script:dirtyActivityStrips.Remove($key)
+                foreach ($threadId in @($script:activityLatencyByThread.Keys)) {
+                    $latency = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $script:activityLatencyByThread[$threadId]
+                    if ($latency -gt 60000) { $script:activityLatencyByThread.Remove($threadId); continue }
+                    if ($script:stripKeysByThread.ContainsKey($threadId) -and $script:stripKeysByThread[$threadId].ContainsKey($key)) {
+                        Write-ActivityDiagnostic "activity-render latencyMs=$latency"
+                        $script:activityLatencyByThread.Remove($threadId)
+                    }
+                }
                 if ($renderWatch.ElapsedMilliseconds -ge 100) {
                     Write-ActivityDiagnostic "allgroups-render strip=0x$key reason=$reason elapsedMs=$($renderWatch.ElapsedMilliseconds)"
                 }
@@ -1364,9 +1312,7 @@ if ($moveSizeHook -eq [IntPtr]::Zero) {
     Write-Warning 'Could not install the move/resize hook; activity dots will still work but may follow a window drag.'
 }
 
-$timer = [System.Windows.Threading.DispatcherTimer]::new()
-$timer.Interval = if ($AllGroupsCached) { [TimeSpan]::FromMilliseconds(1000) } else { [TimeSpan]::FromMilliseconds(350) }
-$timer.Add_Tick({
+function Invoke-ActivityUpdate {
     $tickWatch = [System.Diagnostics.Stopwatch]::StartNew()
     try { Update-ActivityDots }
     catch {
@@ -1380,7 +1326,19 @@ $timer.Add_Tick({
             Write-ActivityDiagnostic "SLOW UPDATE elapsedMs=$($tickWatch.ElapsedMilliseconds)"
         }
     }
-})
+    $hasWorkingDot = $false
+    foreach ($overlay in $script:overlaysByStrip.Values) {
+        if (-not $overlay.Window.IsVisible) { continue }
+        foreach ($visual in $overlay.VisualsByKey.Values) {
+            if ($visual.State -eq 'working') { $hasWorkingDot = $true; break }
+        }
+        if ($hasWorkingDot) { break }
+    }
+    if ($hasWorkingDot) { $pulseTimer.Start() } else { $pulseTimer.Stop() }
+}
+$timer = [System.Windows.Threading.DispatcherTimer]::new()
+$timer.Interval = if ($AllGroupsCached) { [TimeSpan]::FromMilliseconds(1000) } else { [TimeSpan]::FromMilliseconds(350) }
+$timer.Add_Tick({ Invoke-ActivityUpdate })
 
 $pulseTimer = [System.Windows.Threading.DispatcherTimer]::new()
 $pulseTimer.Interval = [TimeSpan]::FromMilliseconds(60)
@@ -1388,13 +1346,8 @@ $pulseTimer.Add_Tick({
     try { Update-WorkingDotPulse } catch {}
 })
 
-try { Update-ActivityDots }
-catch {
-    Hide-AllActivityOverlays
-    Write-ActivityDiagnostic "INITIAL UPDATE ERROR (all overlays hidden): $($_.Exception.Message)"
-}
+Invoke-ActivityUpdate
 $timer.Start()
-$pulseTimer.Start()
 if ($AllGroupsCached) {
     Write-Host 'Showing cached activity dots on every visible Groupy / VS Code tab strip. Press Ctrl+C to stop.'
 }
@@ -1436,16 +1389,7 @@ finally {
         try { if (-not $bridge.Process.HasExited) { $bridge.Process.Stop() } } catch {}
         try { $bridge.Process.Dispose() } catch {}
     }
-    if ($script:sessionFileWatcher) {
-        foreach ($subscription in @($script:sessionFileWatcherSubscriptions)) {
-            try { Unregister-Event -SubscriptionId $subscription.Id -ErrorAction SilentlyContinue } catch {}
-        }
-        foreach ($event in @(Get-Event -ErrorAction SilentlyContinue | Where-Object { $_.SourceIdentifier -like "$($script:sessionFileWatcherSourcePrefix):*" })) {
-            try { Remove-Event -EventIdentifier $event.EventIdentifier -ErrorAction SilentlyContinue } catch {}
-        }
-        try { $script:sessionFileWatcher.EnableRaisingEvents = $false } catch {}
-        try { $script:sessionFileWatcher.Dispose() } catch {}
-    }
+    if ($script:sessionFileWatcher) { $script:sessionFileWatcher.Dispose() }
     foreach ($overlay in @($script:overlaysByStrip.Values)) {
         try { $overlay.Window.Close() } catch {}
     }

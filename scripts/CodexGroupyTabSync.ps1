@@ -63,6 +63,10 @@ namespace CodexGroupy {
         [DllImport("user32.dll")]
         public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool IsHungAppWindow(IntPtr hWnd);
+
         private static readonly ConcurrentDictionary<uint, string> ProcessNameById = new ConcurrentDictionary<uint, string>();
 
         public static bool IsCodeWindow(IntPtr hWnd) {
@@ -245,6 +249,7 @@ namespace CodexGroupy {
         private static long Generation;
 
         [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr hWnd, uint flags);
         [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
         [DllImport("user32.dll", SetLastError = true)] public static extern IntPtr SetWinEventHook(uint eventMin, uint eventMax, IntPtr module, WinEventProc callback, uint processId, uint threadId, uint flags);
         [DllImport("user32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] public static extern bool UnhookWinEvent(IntPtr hook);
@@ -268,7 +273,11 @@ namespace CodexGroupy {
                 return;
             }
             if (eventType != EVENT_OBJECT_NAMECHANGE) return;
-            if (hWnd != IntPtr.Zero && IsCodeWindow(hWnd)) Interlocked.Increment(ref Generation);
+            var foreground = GetForegroundWindow();
+            // The poll already detects native caption drift. Ignore our own SetWindowText notification.
+            if (hWnd == foreground && objectId == 0 && childId == 0) return;
+            if (hWnd != IntPtr.Zero && (hWnd == foreground || GetAncestor(hWnd, 2) == foreground) && IsCodeWindow(foreground))
+                Interlocked.Increment(ref Generation);
         }
 
         public static IntPtr StartForegroundHook() {
@@ -801,156 +810,15 @@ function Get-OpenCodeWindows {
     }
 }
 
-function Get-Descendants([System.Windows.Automation.AutomationElement]$Element) {
-    @($Element) + @($Element.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition
-    ))
-}
-
-function Get-CodexWebviewElements([System.Windows.Automation.AutomationElement]$Root) {
-    $documents = Get-Descendants $Root | Where-Object {
-        $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Document -and
-        $_.Current.Name -eq 'Codex'
-    }
-
-    foreach ($document in $documents) {
-        $elements = Get-Descendants $document
-        # This identifies the Codex webview rather than VS Code's outer accessibility document.
-        if ($elements.Current.Name -contains 'Chats' -or $elements.Current.Name -contains 'New chat') {
-            return $elements
-        }
-    }
-    return @()
-}
-
-function ConvertTo-GroupyTitle([string]$Title) {
-    if ([string]::IsNullOrWhiteSpace($Title)) { return $null }
-    $clean = ($Title -replace '[\r\n\t]+', ' ' -replace '\s{2,}', ' ').Trim()
-    # Keep Groupy tabs legible and prevent an unusually long server-generated title from creating a giant editor.
-    if ($clean.Length -gt 120) { $clean = $clean.Substring(0, 117).TrimEnd() + '...' }
-    return $clean
-}
-
-function Get-CodexActiveTitle([System.Windows.Automation.AutomationElement]$Root) {
-    $documentCondition = [System.Windows.Automation.AndCondition]::new(@(
-        [System.Windows.Automation.PropertyCondition]::new(
-            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-            [System.Windows.Automation.ControlType]::Document
-        ),
-        [System.Windows.Automation.PropertyCondition]::new(
-            [System.Windows.Automation.AutomationElement]::NameProperty,
-            'Codex'
-        )
-    ))
-    $documents = @($Root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $documentCondition))
-    if ($documents.Count -eq 0) { return $null }
-
-    $buttonCondition = [System.Windows.Automation.PropertyCondition]::new(
-        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-        [System.Windows.Automation.ControlType]::Button
-    )
-    foreach ($document in $documents) {
-        $buttons = @($document.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition))
-        $headerTitle = $buttons | Where-Object {
-            -not [string]::IsNullOrWhiteSpace($_.Current.Name) -and
-            $_.Current.ClassName -match 'flex-1\s+truncate' -and
-            $_.Current.ClassName -match 'text-start'
-        } | Select-Object -First 1
-        if ($headerTitle) { return ConvertTo-GroupyTitle $headerTitle.Current.Name }
-    }
-
-    $elements = @(Get-CodexWebviewElements $Root)
-    if ($elements.Count -eq 0) { return $null }
-
-    # Codex exposes the active conversation name directly in its header.  It is a full-width,
-    # truncating text-start Button, unlike the compact action buttons around it. This is both
-    # faster and more reliable than trying to infer selection from the recent-chat list.
-    $headerTitle = $elements | Where-Object {
-        $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and
-        -not [string]::IsNullOrWhiteSpace($_.Current.Name) -and
-        $_.Current.ClassName -match 'flex-1\s+truncate' -and
-        $_.Current.ClassName -match 'text-start'
-    } | Select-Object -First 1
-    if ($headerTitle) { return ConvertTo-GroupyTitle $headerTitle.Current.Name }
-
-    # Every visible recent-chat row is an unnamed-pattern Button. When a chat is open, Codex repeats
-    # its title in the conversation pane/header. The repeated title is the per-window selection signal.
-    $threadButtons = $elements | Where-Object {
-        $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and
-        -not [string]::IsNullOrWhiteSpace($_.Current.Name) -and
-        $_.Current.Name -notin @('New chat', 'Archive chat', 'Delete chat', 'Rename chat') -and
-        $_.Current.ClassName -match 'app-action-sidebar-thread'
-    }
-
-    $candidates = foreach ($thread in $threadButtons) {
-        $title = ConvertTo-GroupyTitle $thread.Current.Name
-        if (-not $title) { continue }
-
-        $matches = $elements | Where-Object { (ConvertTo-GroupyTitle $_.Current.Name) -eq $title }
-        $outsideSidebar = @($matches | Where-Object {
-            $_.Current.ClassName -notmatch 'app-action-sidebar-thread'
-        })
-
-        if ($outsideSidebar.Count -gt 0) {
-            [pscustomobject]@{
-                Title = $title
-                Score = $outsideSidebar.Count
-                Evidence = $outsideSidebar | ForEach-Object { "$($_.Current.ControlType.ProgrammaticName):$($_.Current.ClassName)" }
-            }
-        }
-    }
-
-    # No selected chat is expected on Codex's home/new-chat screen.
-    $winner = $candidates | Sort-Object Score -Descending | Select-Object -First 1
-    if ($winner) { return $winner.Title }
-    return $null
-}
-
-function Get-CodexAutoTitleTarget([System.Windows.Automation.AutomationElement]$Root) {
-    $chatTitle = Get-CodexActiveTitle $Root
-    if ($chatTitle) {
-        return [pscustomobject]@{ State = 'chat'; Title = $chatTitle }
-    }
-
-    # A visible Codex accessibility document with no active conversation is its home/new-chat
-    # screen. When that document is absent, the user has closed or hidden the Codex extension.
-    $codexElements = @(Get-CodexWebviewElements $Root)
-    if ($codexElements.Count -gt 0) {
-        return [pscustomobject]@{ State = 'home'; Title = (ConvertTo-GroupyTitle $CodexHomeTitle) }
-    }
-    return [pscustomobject]@{ State = 'closed'; Title = (ConvertTo-GroupyTitle $CodexClosedTitle) }
-}
-
-function Get-CodeWorkspaceName([System.Windows.Automation.AutomationElement]$Root) {
-    # The normal VS Code window caption is deliberately replaced in auto-title mode, so derive
-    # the project name from the first root item in its Files Explorer accessibility tree instead.
-    $filesExplorer = Get-Descendants $Root | Where-Object {
-        $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Tree -and
-        $_.Current.Name -eq 'Files Explorer'
-    } | Select-Object -First 1
-    if ($filesExplorer) {
-        $roots = @($filesExplorer.FindAll(
-            [System.Windows.Automation.TreeScope]::Children,
-            [System.Windows.Automation.PropertyCondition]::new(
-                [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-                [System.Windows.Automation.ControlType]::TreeItem
-            )
-        ))
-        if ($roots.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($roots[0].Current.Name)) {
-            return ConvertTo-GroupyTitle $roots[0].Current.Name
-        }
-    }
-    return $null
-}
+. (Join-Path $PSScriptRoot 'CodexGroupyTitleProbe.ps1')
 
 function Get-WorkspaceNameFromNativeTitle([string]$Title) {
     # Before this helper changes a caption, VS Code uses "file - workspace - Visual Studio Code".
     # The final segment is stable even when the active editor file changes, so it is a useful
     # fallback when VS Code's Files Explorer accessibility tree is temporarily unavailable.
     $clean = ConvertTo-GroupyTitle $Title
-    if (-not $clean) { return $null }
-    $clean = $clean -replace '\s+-\s+Visual Studio Code$', ''
+    if ($clean -notmatch '\s+-\s+Visual Studio Code(?: - Insiders)?$') { return $null }
+    $clean = $clean -replace '\s+-\s+Visual Studio Code(?: - Insiders)?$', ''
     $parts = @($clean -split '\s+-\s+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     if ($parts.Count -ge 2) { return ConvertTo-GroupyTitle $parts[$parts.Count - 1] }
     return $null
@@ -1096,11 +964,6 @@ if ($Inspect -or (-not $Watch -and -not $WatchAutoTitle)) {
 }
 
 $lastTitleByHwnd = @{}
-$lastAutoTargetByHwnd = @{}
-$nextAutoUiaProbeAtByHwnd = @{}
-$lastAutoEventGenerationByHwnd = @{}
-$nextAutoEventProbeAtByHwnd = @{}
-$workspaceNameByHwnd = @{}
 $lastUiAutomationWarningAt = [DateTime]::MinValue
 $repoRoot = Split-Path -Path $PSScriptRoot -Parent
 $titleSyncDiagnosticsPath = Join-Path $repoRoot 'work\CodexGroupyTabSyncRuntime.log'
@@ -1110,90 +973,162 @@ function Write-TitleSyncDiagnostic([string]$Message) {
         [System.IO.File]::AppendAllText($titleSyncDiagnosticsPath, $line + [Environment]::NewLine)
     } catch {}
 }
-$titleForegroundHook = [IntPtr]::Zero
-$titleNameHook = [IntPtr]::Zero
-if ($WatchAutoTitle) {
-    $titleForegroundHook = [CodexGroupy.TitleSyncEventNativeV1]::StartForegroundHook()
-    $titleNameHook = [CodexGroupy.TitleSyncEventNativeV1]::StartFocusNameHook()
-    Write-Host 'Watching the foreground VS Code window in no-dialog auto-title mode. Press Ctrl+C to stop.'
-} else {
-    Write-Host 'Watching the foreground VS Code window. Press Ctrl+C to stop.'
+$script:titleProbeWorker = $null
+
+function Stop-TitleProbeWorker {
+    if ($null -eq $script:titleProbeWorker) { return }
+    $worker = $script:titleProbeWorker
+    if (-not $worker.HasExited) {
+        try { $worker.Kill() } catch { if (-not $worker.HasExited) { throw } }
+    }
+    $worker.Dispose()
+    $script:titleProbeWorker = $null
 }
-while ($true) {
+
+function Invoke-TitleProbe([IntPtr]$Handle, [bool]$NeedWorkspace) {
+    if ($null -eq $script:titleProbeWorker -or $script:titleProbeWorker.HasExited) {
+        Stop-TitleProbeWorker
+        $startInfo = [Diagnostics.ProcessStartInfo]::new()
+        $startInfo.FileName = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $workerPath = Join-Path $PSScriptRoot 'CodexGroupyTitleProbe.ps1'
+        $startInfo.Arguments = '-NoProfile -NonInteractive -MTA -ExecutionPolicy Bypass -File "{0}" -ParentProcessId {1}' -f $workerPath, $PID
+        $startInfo.UseShellExecute = $false
+        $startInfo.CreateNoWindow = $true
+        $startInfo.RedirectStandardInput = $true
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
+        $script:titleProbeWorker = [Diagnostics.Process]::Start($startInfo)
+    }
+
+    $request = @{ Handle = $Handle.ToInt64(); NeedWorkspace = $NeedWorkspace } | ConvertTo-Json -Compress
+    $script:titleProbeWorker.StandardInput.WriteLine($request)
+    $reply = $script:titleProbeWorker.StandardOutput.ReadLineAsync()
+    if (-not $reply.Wait(3000)) {
+        throw [TimeoutException]::new('Accessibility scan exceeded 3 seconds.')
+    }
+    if ([string]::IsNullOrWhiteSpace($reply.Result)) { throw 'Title probe worker exited without a reply.' }
+    $result = ConvertFrom-Json -InputObject $reply.Result
+    if ($result.Error) { throw "Title probe failed: $($result.Error)." }
+    return $result
+}
+
+function Watch-AutoTitle {
+    $foregroundHook = [CodexGroupy.TitleSyncEventNativeV1]::StartForegroundHook()
+    $nameHook = [CodexGroupy.TitleSyncEventNativeV1]::StartFocusNameHook()
+    $windows = @{}
+    $retrySeconds = 0
+    $nextProbeAt = [DateTime]::MinValue
+    $pendingKey = $null
+    $pendingSince = [DateTime]::MinValue
+    Write-Host 'Watching the foreground VS Code window in no-dialog auto-title mode. Press Ctrl+C to stop.'
     try {
-        if ($WatchAutoTitle) {
+        while ($true) {
+            Start-Sleep -Milliseconds $PollIntervalMs
+            # Out-of-context WinEvent hooks deliver callbacks on the registering thread.
+            [System.Windows.Forms.Application]::DoEvents()
+            $now = [DateTime]::UtcNow
             $handle = Get-ForegroundCodeWindowHandle
-            if ($handle -ne [IntPtr]::Zero) {
-                $key = $handle.ToInt64().ToString('X')
-                $now = Get-Date
-                $generation = [CodexGroupy.TitleSyncEventNativeV1]::GetGeneration()
-                $cached = if ($lastAutoTargetByHwnd.ContainsKey($key)) { $lastAutoTargetByHwnd[$key] } else { $null }
-                $nativeTitle = Get-NativeWindowTitle $handle
-                $probeDue = -not $nextAutoUiaProbeAtByHwnd.ContainsKey($key) -or $now -ge $nextAutoUiaProbeAtByHwnd[$key]
-                $eventChanged = -not $lastAutoEventGenerationByHwnd.ContainsKey($key) -or $lastAutoEventGenerationByHwnd[$key] -ne $generation
-                $eventProbeAllowed = -not $nextAutoEventProbeAtByHwnd.ContainsKey($key) -or $now -ge $nextAutoEventProbeAtByHwnd[$key]
-                $target = $null
-                $root = $null
-                $shouldProbe = (-not $cached) -or $nativeTitle -ne $cached.DesiredTitle -or $probeDue -or ($eventChanged -and $eventProbeAllowed)
-                $probeReason = if (-not $cached) { 'cold' } elseif ($nativeTitle -ne $cached.DesiredTitle) { 'native-title-drift' } elseif ($probeDue) { 'safety' } elseif ($eventChanged -and $eventProbeAllowed) { 'win-event' } else { 'none' }
-                if ($cached -and $cached.Title -and -not $shouldProbe) {
-                    $target = [pscustomobject]@{ State = $cached.State; Title = $cached.Title; Cached = $true }
-                }
-                else {
-                    $probeWatch = [Diagnostics.Stopwatch]::StartNew()
-                    $root = [System.Windows.Automation.AutomationElement]::FromHandle($handle)
-                    $target = Get-CodexAutoTitleTarget $root
-                    $probeWatch.Stop()
-                    if ($probeWatch.ElapsedMilliseconds -ge 75) {
-                        Write-TitleSyncDiagnostic "uia-probe hwnd=0x$key reason=$probeReason elapsedMs=$($probeWatch.ElapsedMilliseconds)"
-                    }
-                    $lastAutoEventGenerationByHwnd[$key] = $generation
-                    $nextAutoEventProbeAtByHwnd[$key] = $now.AddMilliseconds(500)
-                }
-                if ($target.Title) {
-                    # Cache the native VS Code workspace label while it still owns the caption.
-                    # That cache is then available the instant Codex moves to Home or is closed.
-                    $nativeWorkspace = Get-WorkspaceNameFromNativeTitle $nativeTitle
-                    if ($nativeWorkspace) { $workspaceNameByHwnd[$key] = $nativeWorkspace }
-                    $desiredTitle = if ($target.State -eq 'chat') {
-                        $target.Title
-                    } else {
-                        $rootForWorkspace = if ($root) { $root } else { [System.Windows.Automation.AutomationElement]::FromHandle($handle) }
-                        $workspace = Get-CodeWorkspaceName $rootForWorkspace
-                        if (-not $workspace -and $workspaceNameByHwnd.ContainsKey($key)) {
-                            $workspace = $workspaceNameByHwnd[$key]
-                        }
-                        if (-not $workspace) {
-                            $workspace = Get-WorkspaceNameFromNativeTitle $nativeTitle
-                        }
-                        if ($workspace) {
-                            $workspace
-                        } else {
-                            $target.Title
-                        }
-                    }
-                    # VS Code can overwrite its caption while the same chat remains open (for example,
-                    # when switching editor files). Reapply only when its actual caption differs.
-                    if ($nativeTitle -ne $desiredTitle) {
-                        Set-NativeWindowTitle $handle $desiredTitle
-                        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] $key -> $desiredTitle ($($target.State))"
-                    }
-                    $lastAutoTargetByHwnd[$key] = [pscustomobject]@{ State = $target.State; Title = $target.Title; DesiredTitle = $desiredTitle }
-                    $nextAutoUiaProbeAtByHwnd[$key] = if ($target.State -eq 'chat') { $now.AddSeconds(8) } else { $now.AddSeconds(3) }
+            if ($handle -eq [IntPtr]::Zero -or [CodexGroupy.Native]::IsHungAppWindow($handle)) {
+                $pendingKey = $null
+                continue
+            }
+            [uint32]$processId = 0
+            [void][CodexGroupy.Native]::GetWindowThreadProcessId($handle, [ref]$processId)
+            $key = '{0}:0x{1:X}' -f $processId, $handle.ToInt64()
+            $generation = [CodexGroupy.TitleSyncEventNativeV1]::GetGeneration()
+            $cached = $windows[$key]
+            $nativeTitle = Get-NativeWindowTitle $handle
+            $reason = if (-not $cached) { 'cold' }
+                elseif ($nativeTitle -ne $cached.DesiredTitle) { 'native-title-drift' }
+                elseif ($now -ge $cached.RefreshAt) { 'safety' }
+                elseif ($generation -ne $cached.Generation) { 'win-event' }
+                else { $null }
+            if (-not $reason) { $pendingKey = $null; continue }
+            if ($pendingKey -ne $key) {
+                $pendingKey = $key
+                $pendingSince = $now
+            }
+            # Coalesce a burst on one window without waiting forever for quiet.
+            if ($now -lt $nextProbeAt -or ($now - $pendingSince).TotalMilliseconds -lt 250) { continue }
+            $pendingKey = $null
+
+            $workspace = Get-WorkspaceNameFromNativeTitle $nativeTitle
+            if (-not $workspace -and $cached) { $workspace = $cached.Workspace }
+            $stopwatch = [Diagnostics.Stopwatch]::StartNew()
+            try {
+                $target = Invoke-TitleProbe -Handle $handle -NeedWorkspace (-not $workspace)
+            } catch {
+                Stop-TitleProbeWorker
+                $retrySeconds = if ($retrySeconds -eq 0) { 5 } else { [math]::Min(60, 2 * $retrySeconds) }
+                $nextProbeAt = [DateTime]::UtcNow.AddSeconds($retrySeconds)
+                Write-TitleSyncDiagnostic "uia-probe $key reason=$reason elapsedMs=$($stopwatch.ElapsedMilliseconds) retrySeconds=$retrySeconds error=$($_.Exception.Message)"
+                continue
+            }
+            $stopwatch.Stop()
+            $finishedAt = [DateTime]::UtcNow
+            $retrySeconds = 0
+            $nextProbeAt = $finishedAt.AddMilliseconds(500)
+            if ($stopwatch.ElapsedMilliseconds -ge 75) {
+                Write-TitleSyncDiagnostic "uia-probe hwnd=0x$($handle.ToInt64().ToString('X')) reason=$reason elapsedMs=$($stopwatch.ElapsedMilliseconds)"
+            }
+
+            # A completed scan belongs to its original foreground window.
+            [uint32]$currentProcessId = 0
+            [void][CodexGroupy.Native]::GetWindowThreadProcessId($handle, [ref]$currentProcessId)
+            if ($handle -ne (Get-ForegroundCodeWindowHandle) -or $processId -ne $currentProcessId -or
+                [CodexGroupy.Native]::IsHungAppWindow($handle)) { continue }
+
+            $nativeTitle = Get-NativeWindowTitle $handle
+            $currentWorkspace = Get-WorkspaceNameFromNativeTitle $nativeTitle
+            if ($currentWorkspace) { $workspace = $currentWorkspace }
+            elseif ($target.Workspace) { $workspace = $target.Workspace }
+            $desiredTitle = if ($target.State -eq 'chat') { $target.Title }
+                elseif ($workspace) { $workspace }
+                elseif ($target.State -eq 'home') { ConvertTo-GroupyTitle $CodexHomeTitle }
+                else { ConvertTo-GroupyTitle $CodexClosedTitle }
+            if ($desiredTitle -and $nativeTitle -ne $desiredTitle) {
+                try {
+                    Set-NativeWindowTitle $handle $desiredTitle
+                    $latencyMs = [long]([DateTime]::UtcNow - $pendingSince).TotalMilliseconds
+                    Write-TitleSyncDiagnostic "title-update reason=$reason latencyMs=$latencyMs scanMs=$($stopwatch.ElapsedMilliseconds)"
+                    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] $key -> $desiredTitle ($($target.State))"
+                } catch {
+                    Write-TitleSyncDiagnostic "caption-update $key error=$($_.Exception.Message)"
+                    $nextProbeAt = [DateTime]::UtcNow.AddSeconds(5)
+                    continue
                 }
             }
+            $windows[$key] = [pscustomobject]@{
+                DesiredTitle = if ($desiredTitle) { $desiredTitle } else { $nativeTitle }
+                Workspace = $workspace
+                RefreshAt = $finishedAt.AddSeconds(8)
+                Generation = $generation
+            }
         }
-        else {
-            $window = Get-ForegroundCodeWindow -IncludeRoot
-            if ($window) {
-                $title = Get-CodexActiveTitle $window.Root
-                if ($title) {
-                    $key = $window.Handle.ToInt64().ToString('X')
-                    if ($lastTitleByHwnd[$key] -ne $title) {
-                        Invoke-GroupyRename $title
-                        $lastTitleByHwnd[$key] = $title
-                        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] $key -> $title"
-                    }
+    } finally {
+        Stop-TitleProbeWorker
+        if ($foregroundHook -ne [IntPtr]::Zero) { [void][CodexGroupy.TitleSyncEventNativeV1]::UnhookWinEvent($foregroundHook) }
+        if ($nameHook -ne [IntPtr]::Zero) { [void][CodexGroupy.TitleSyncEventNativeV1]::UnhookWinEvent($nameHook) }
+    }
+}
+
+if ($WatchAutoTitle) {
+    Watch-AutoTitle
+    return
+}
+
+Write-Host 'Watching the foreground VS Code window. Press Ctrl+C to stop.'
+while ($true) {
+    try {
+        $window = Get-ForegroundCodeWindow -IncludeRoot
+        if ($window) {
+            $title = Get-CodexActiveTitle $window.Root
+            if ($title) {
+                $key = $window.Handle.ToInt64().ToString('X')
+                if ($lastTitleByHwnd[$key] -ne $title) {
+                    Invoke-GroupyRename $title
+                    $lastTitleByHwnd[$key] = $title
+                    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] $key -> $title"
                 }
             }
         }

@@ -8,7 +8,6 @@ This is the full new-machine setup guide for this repo. The goal is to recreate 
 - yellow/green activity dots across visible Groupy tab strips;
 - `Ctrl+1` through `Ctrl+9` switches exact Groupy tab positions;
 - `Ctrl+Shift+N` duplicates the current VS Code workspace into a new detached Groupy group;
-- `Ctrl+Shift+R` renames the current Codex chat;
 - a subtle context/weekly usage badge appears on the active Groupy strip;
 - one supervisor keeps all helpers running and starts automatically at Windows logon.
 
@@ -240,8 +239,8 @@ Expected components:
 
 ```text
 Codex / Groupy supervisor
+Codex session lookup index
 Codex tab-title sync
-Codex chat rename Ctrl+Shift+R
 Groupy Ctrl+1 through Ctrl+9
 Separate-group Ctrl+Shift+N
 Usage/context overlay
@@ -366,9 +365,6 @@ Ctrl+1 through Ctrl+9
 
 Ctrl+Shift+N
   Duplicate the current VS Code workspace and physically detach it into a separate Groupy group.
-
-Ctrl+Shift+R
-  Rename the currently selected Codex chat.
 ```
 
 Groupy itself must also have:
@@ -385,11 +381,11 @@ If a hotkey fails to register, another app is probably already using it. Check t
 The supervisor owns these helpers:
 
 ```text
+CodexGroupySessionIndex.ps1
+  Builds the shared title-to-rollout lookup in the background and refreshes it when sessions change.
+
 CodexGroupyTabSync.ps1 -WatchAutoTitle
   Reads the selected Codex chat title from the foreground VS Code UI Automation tree and writes it to the VS Code window caption.
-
-CodexChatRenameHotkey.ps1
-  Registers Ctrl+Shift+R and renames the selected Codex chat through VS Code's live Codex connection when available, with a detached persisted fallback.
 
 GroupyNumberTabs.ps1
   Registers Ctrl+1 through Ctrl+9 and reads GroupyCtrl.exe's live ordered tab HWND array for exact tab selection.
@@ -423,9 +419,8 @@ Then verify manually:
 5. Start a Codex task in one tab; a yellow dot should appear quickly.
 6. Switch to another tab before the task finishes; after completion, the first tab should turn green.
 7. Focus the completed tab; the green dot should clear.
-8. Press `Ctrl+Shift+R` in a Codex chat; rename it and confirm the visible title updates.
-9. Press `Ctrl+Shift+N`; the current VS Code workspace should duplicate into a separated Groupy group.
-10. Confirm the usage/context badge appears on the active Groupy strip.
+8. Press `Ctrl+Shift+N`; the current VS Code workspace should duplicate into a separated Groupy group.
+9. Confirm the usage/context badge appears on the active Groupy strip.
 
 ## Diagnostic commands
 
@@ -440,7 +435,6 @@ Logs:
 ```powershell
 Get-Content .\work\CodexGroupySupervisor.log -Tail 80
 Get-Content .\work\CodexGroupyTabSyncRuntime.log -Tail 80
-Get-Content .\work\CodexChatRenameHotkey.log -Tail 80
 Get-Content .\work\ActivityDotsRuntime.log -Tail 80
 ```
 
@@ -539,18 +533,6 @@ Likely causes:
 
 Fix manually renamed tabs by closing/reopening that VS Code window so Groupy creates a fresh auto-following tab.
 
-### Ctrl+Shift+R rename does not persist live in VS Code
-
-The rename helper prefers VS Code's live extension-host Inspector bridge. If VS Code does not expose a usable Inspector endpoint, it falls back to a detached persisted-name update and native window caption update.
-
-Check:
-
-```powershell
-Get-Content .\work\CodexChatRenameHotkey.log -Tail 80
-```
-
-If the log says no live Codex VS Code connection was prepared, open the Codex view in VS Code and reload/restart the VS Code extension host.
-
 ### Activity dots missing or stale
 
 Check:
@@ -592,7 +574,10 @@ scripts\CodexGroupySupervisor.ps1
 scripts\Start-CodexGroupyTools.ps1
 scripts\Stop-CodexGroupyTools.ps1
 scripts\CodexGroupyTabSync.ps1
-scripts\CodexChatRenameHotkey.ps1
+scripts\CodexGroupyTitleProbe.ps1
+scripts\CodexGroupySessionIndex.ps1
+scripts\CodexGroupySessionIndex.js
+scripts\CodexGroupySessionLookup.ps1
 scripts\GroupyNumberTabs.ps1
 scripts\GroupySeparateWindowHotkey.ps1
 scripts\GroupyWindowShortcuts.ps1

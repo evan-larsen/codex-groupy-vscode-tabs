@@ -22,8 +22,6 @@ if ([Threading.Thread]::CurrentThread.ApartmentState -ne 'STA') {
 }
 
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
-Add-Type -AssemblyName UIAutomationClient
-Add-Type -AssemblyName UIAutomationTypes
 
 if (-not ('CodexGroupy.UsageOverlayNativeV5' -as [type])) {
     Add-Type -TypeDefinition @'
@@ -37,14 +35,12 @@ namespace CodexGroupy {
     public static class UsageOverlayNativeV5 {
         [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
         public delegate void WinEventDelegate(IntPtr hook, uint eventType, IntPtr hWnd, int objectId, int childId, uint eventThread, uint eventTime);
-        private const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
         private const uint EVENT_SYSTEM_MOVESIZESTART = 0x000A;
         private const uint EVENT_SYSTEM_MOVESIZEEND = 0x000B;
         private const uint WINEVENT_OUTOFCONTEXT = 0;
         private static readonly ConcurrentDictionary<IntPtr, byte> MovingCodeWindows = new ConcurrentDictionary<IntPtr, byte>();
         private static readonly ConcurrentDictionary<uint, string> ProcessNameById = new ConcurrentDictionary<uint, string>();
         private static readonly WinEventDelegate MoveSizeCallback = OnMoveSizeEvent;
-        private static long ForegroundGeneration;
         [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxCount);
         [DllImport("user32.dll")] private static extern int GetWindowTextLength(IntPtr hWnd);
@@ -77,21 +73,16 @@ namespace CodexGroupy {
             return IntPtr.Zero;
         }
         private static void OnMoveSizeEvent(IntPtr hook, uint eventType, IntPtr hWnd, int objectId, int childId, uint eventThread, uint eventTime) {
-            if (eventType == EVENT_SYSTEM_FOREGROUND) { System.Threading.Interlocked.Increment(ref ForegroundGeneration); return; }
             IntPtr codeWindow = ResolveMoveTarget(hWnd);
             if (codeWindow == IntPtr.Zero) return;
             if (eventType == EVENT_SYSTEM_MOVESIZESTART) MovingCodeWindows[codeWindow] = 0;
             else if (eventType == EVENT_SYSTEM_MOVESIZEEND) { byte ignored; MovingCodeWindows.TryRemove(codeWindow, out ignored); }
         }
+        public static bool IsAnyMoveSizeActive() { return !MovingCodeWindows.IsEmpty; }
+        public static bool IsMoveSizeActive(IntPtr hWnd) { return MovingCodeWindows.ContainsKey(hWnd); }
         public static IntPtr StartMoveSizeHook() {
             return SetWinEventHook(EVENT_SYSTEM_MOVESIZESTART, EVENT_SYSTEM_MOVESIZEEND, IntPtr.Zero, MoveSizeCallback, 0, 0, WINEVENT_OUTOFCONTEXT);
         }
-        public static IntPtr StartForegroundHook() {
-            return SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, IntPtr.Zero, MoveSizeCallback, 0, 0, WINEVENT_OUTOFCONTEXT);
-        }
-        public static bool IsAnyMoveSizeActive() { return !MovingCodeWindows.IsEmpty; }
-        public static bool IsMoveSizeActive(IntPtr hWnd) { return MovingCodeWindows.ContainsKey(hWnd); }
-        public static long GetForegroundGeneration() { return System.Threading.Interlocked.Read(ref ForegroundGeneration); }
     }
 }
 '@
@@ -133,80 +124,17 @@ $window.Add_SourceInitialized({
 })
 
 $usageScript = Join-Path $PSScriptRoot 'Get-CodexUsage.ps1'
-$sessionIndexPath = Join-Path $env:USERPROFILE '.codex\session_index.jsonl'
-$sessionsRoot = Join-Path $env:USERPROFILE '.codex\sessions'
+. (Join-Path $PSScriptRoot 'CodexGroupySessionLookup.ps1')
+$script:sessionLookup = New-CodexGroupySessionLookup
+$script:sessionSnapshot = $script:sessionLookup.GetSnapshot()
 $script:usageLabel = 'loading...'
 $script:contextLabel = $null
 $script:contextCache = @{}
-
-function ConvertTo-CodexTitleKey([string]$Title) {
-    if ([string]::IsNullOrWhiteSpace($Title)) { return $null }
-    $clean = ($Title -replace '[\r\n\t]+', ' ' -replace '\s{2,}', ' ').Trim()
-    # Must match the watcher, which caps the window caption before Groupy sees it.
-    if ($clean.Length -gt 120) { $clean = $clean.Substring(0, 117).TrimEnd() + '...' }
-    return $clean
-}
-
-function Get-CodexActiveTitleFromWindow([IntPtr]$Handle) {
-    try {
-        $root = [System.Windows.Automation.AutomationElement]::FromHandle($Handle)
-        $documentCondition = [System.Windows.Automation.AndCondition]::new(@(
-            [System.Windows.Automation.PropertyCondition]::new(
-                [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-                [System.Windows.Automation.ControlType]::Document
-            ),
-            [System.Windows.Automation.PropertyCondition]::new(
-                [System.Windows.Automation.AutomationElement]::NameProperty,
-                'Codex'
-            )
-        ))
-        $document = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $documentCondition)
-        if (-not $document) { return $null }
-
-        $buttonCondition = [System.Windows.Automation.PropertyCondition]::new(
-            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-            [System.Windows.Automation.ControlType]::Button
-        )
-        $buttons = $document.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
-        foreach ($button in $buttons) {
-            if ([string]::IsNullOrWhiteSpace($button.Current.Name)) { continue }
-            if ($button.Current.ClassName -match 'flex-1\s+truncate' -and $button.Current.ClassName -match 'text-start') {
-                return ConvertTo-CodexTitleKey $button.Current.Name
-            }
-        }
-    }
-    catch {
-        # UIA can temporarily deny access while VS Code is rebuilding its webview. Treat that as no chat.
-    }
-    return $null
-}
-
-function Find-CodexSessionLog([string]$TitleKey) {
-    if (-not $TitleKey -or -not (Test-Path -LiteralPath $sessionIndexPath)) { return $null }
-
-    $matchesById = @{}
-    foreach ($line in Get-Content -LiteralPath $sessionIndexPath) {
-        try { $entry = $line | ConvertFrom-Json -ErrorAction Stop } catch { continue }
-        if (-not $entry.PSObject.Properties['thread_name']) { continue }
-        if ((ConvertTo-CodexTitleKey $entry.thread_name) -ne $TitleKey -or -not $entry.id) { continue }
-        $matchesById[$entry.id] = $entry
-    }
-    # Refuse to guess when two separate chats share a title.
-    if ($matchesById.Count -ne 1) { return $null }
-
-    $sessionId = @($matchesById.Keys)[0]
-    $candidate = Get-ChildItem -LiteralPath $sessionsRoot -Recurse -File -Filter "*$sessionId.jsonl" -ErrorAction SilentlyContinue |
-        Select-Object -First 1
-    if ($candidate) { return $candidate.FullName }
-    return $null
-}
 
 function Get-CodexContextCacheEntry([IntPtr]$Handle) {
     $key = $Handle.ToInt64().ToString('X')
     if (-not $script:contextCache.ContainsKey($key)) {
         $script:contextCache[$key] = @{
-            NativeCaption = $null
-            TitleKey = $null
             LogPath = $null
             LastWriteTicks = -1
             Label = $null
@@ -215,49 +143,16 @@ function Get-CodexContextCacheEntry([IntPtr]$Handle) {
     return $script:contextCache[$key]
 }
 
-function Get-CachedCodexContextLabel([IntPtr]$Handle) {
-    $key = $Handle.ToInt64().ToString('X')
-    if ($script:contextCache.ContainsKey($key)) { return $script:contextCache[$key].Label }
-    return $null
-}
-
-function Get-CodexContextLabel([IntPtr]$Handle, [switch]$AllowUiAutomation) {
+function Get-CodexContextLabel([IntPtr]$Handle) {
     $entry = Get-CodexContextCacheEntry $Handle
     $nativeCaption = [CodexGroupy.UsageOverlayNativeV5]::ReadWindowTitle($Handle)
-    $nativeTitleKey = ConvertTo-CodexTitleKey $nativeCaption
-    $captionChanged = ($entry.NativeCaption -ne $nativeCaption)
-    if ($captionChanged) {
-        $entry.NativeCaption = $nativeCaption
-        $entry.TitleKey = $nativeTitleKey
-        $entry.LogPath = if ($nativeTitleKey) { Find-CodexSessionLog $nativeTitleKey } else { $null }
+    $chat = $script:sessionSnapshot.FindByTitle($nativeCaption)
+    $logPath = if ($chat) { $chat.LogPath } else { $null }
+    if ($entry.LogPath -ne $logPath) {
+        $entry.LogPath = $logPath
         $entry.LastWriteTicks = -1
         $entry.Label = $null
     }
-
-    # When the title watcher is not currently owning the native caption, read the selected Codex header directly.
-    if (-not $entry.LogPath -and $AllowUiAutomation) {
-        $uiaTitleKey = Get-CodexActiveTitleFromWindow $Handle
-        if ($uiaTitleKey -and $entry.TitleKey -ne $uiaTitleKey) {
-            $entry.TitleKey = $uiaTitleKey
-            $entry.LogPath = Find-CodexSessionLog $uiaTitleKey
-            $entry.LastWriteTicks = -1
-            $entry.Label = $null
-        }
-    }
-
-    if (-not $entry.TitleKey -or -not $entry.LogPath) { return $null }
-
-    if ($AllowUiAutomation -and $entry.TitleKey -ne $nativeTitleKey -and -not $captionChanged) {
-        # Keep checking the visible Codex header on windows whose native caption belongs to VS Code.
-        $uiaTitleKey = Get-CodexActiveTitleFromWindow $Handle
-        if ($uiaTitleKey -and $entry.TitleKey -ne $uiaTitleKey) {
-            $entry.TitleKey = $uiaTitleKey
-            $entry.LogPath = Find-CodexSessionLog $uiaTitleKey
-            $entry.LastWriteTicks = -1
-            $entry.Label = $null
-        }
-    }
-
     if (-not $entry.LogPath -or -not (Test-Path -LiteralPath $entry.LogPath)) { return $null }
 
     $logItem = Get-Item -LiteralPath $entry.LogPath
@@ -314,6 +209,7 @@ function Update-UsageText {
 }
 
 function Update-ContextText {
+    $script:sessionSnapshot = $script:sessionLookup.GetSnapshot()
     if ([CodexGroupy.UsageOverlayNativeV5]::IsAnyMoveSizeActive()) { return }
     $foreground = [CodexGroupy.UsageOverlayNativeV5]::GetForegroundWindow()
     $strip = [CodexGroupy.UsageOverlayNativeV5]::GetProp($foreground, 'GP_LINK')
@@ -321,26 +217,9 @@ function Update-ContextText {
         $script:contextLabel = $null
     }
     else {
-        $script:contextLabel = Get-CodexContextLabel $foreground -AllowUiAutomation
+        $script:contextLabel = Get-CodexContextLabel $foreground
     }
     Update-OverlayText
-}
-
-function Warm-CurrentGroupyContextCache {
-    if ([CodexGroupy.UsageOverlayNativeV5]::IsAnyMoveSizeActive()) { return }
-    $foreground = [CodexGroupy.UsageOverlayNativeV5]::GetForegroundWindow()
-    if (-not [CodexGroupy.UsageOverlayNativeV5]::IsCodeWindow($foreground)) { return }
-    $activeStrip = [CodexGroupy.UsageOverlayNativeV5]::GetProp($foreground, 'GP_LINK')
-    if ($activeStrip -eq [IntPtr]::Zero) { return }
-
-    # Cache only the windows in the currently visible Groupy group; do not wake or focus them.
-    foreach ($process in Get-Process -ErrorAction SilentlyContinue | Where-Object {
-        $_.ProcessName -in @('Code', 'Code - Insiders') -and $_.MainWindowHandle -ne 0
-    }) {
-        $handle = [IntPtr]$process.MainWindowHandle
-        if ([CodexGroupy.UsageOverlayNativeV5]::GetProp($handle, 'GP_LINK') -ne $activeStrip) { continue }
-        [void](Get-CodexContextLabel $handle)
-    }
 }
 
 function Write-ContextInspection {
@@ -348,8 +227,8 @@ function Write-ContextInspection {
     $isCode = [CodexGroupy.UsageOverlayNativeV5]::IsCodeWindow($foreground)
     $strip = if ($isCode) { [CodexGroupy.UsageOverlayNativeV5]::GetProp($foreground, 'GP_LINK') } else { [IntPtr]::Zero }
     $nativeTitle = if ($isCode) { [CodexGroupy.UsageOverlayNativeV5]::ReadWindowTitle($foreground) } else { $null }
-    $titleKey = ConvertTo-CodexTitleKey $nativeTitle
-    $context = if ($isCode -and $strip -ne [IntPtr]::Zero) { Get-CodexContextLabel $foreground -AllowUiAutomation } else { $null }
+    $titleKey = [CodexGroupy.SessionSnapshot]::TitleKey($nativeTitle)
+    $context = if ($isCode -and $strip -ne [IntPtr]::Zero) { Get-CodexContextLabel $foreground } else { $null }
     $cacheEntry = if ($isCode) { Get-CodexContextCacheEntry $foreground } else { $null }
     [pscustomobject]@{
         ActiveHwnd = if ($foreground -eq [IntPtr]::Zero) { '<none>' } else { '0x{0:X}' -f $foreground.ToInt64() }
@@ -363,6 +242,8 @@ function Write-ContextInspection {
 }
 
 if ($InspectContext) {
+    Start-Sleep -Milliseconds 500
+    $script:sessionSnapshot = $script:sessionLookup.GetSnapshot()
     Write-ContextInspection
     return
 }
@@ -397,21 +278,20 @@ function Update-OverlayPlacement {
     if (-not $window.IsVisible) { $window.Show() }
 }
 
-$lastForegroundGeneration = -1
+$script:lastContextWindow = [IntPtr]::Zero
+$script:lastContextCaption = $null
 function Update-ContextOnForegroundChange {
     if ([CodexGroupy.UsageOverlayNativeV5]::IsAnyMoveSizeActive()) { return }
-    $generation = [CodexGroupy.UsageOverlayNativeV5]::GetForegroundGeneration()
-    if ($generation -eq $script:lastForegroundGeneration) { return }
-    $script:lastForegroundGeneration = $generation
     $foreground = [CodexGroupy.UsageOverlayNativeV5]::GetForegroundWindow()
-    $strip = [CodexGroupy.UsageOverlayNativeV5]::GetProp($foreground, 'GP_LINK')
-    $script:contextLabel = if ($strip -ne [IntPtr]::Zero -and [CodexGroupy.UsageOverlayNativeV5]::IsCodeWindow($foreground)) {
-        Get-CachedCodexContextLabel $foreground
+    $caption = if ([CodexGroupy.UsageOverlayNativeV5]::IsCodeWindow($foreground)) {
+        [CodexGroupy.UsageOverlayNativeV5]::ReadWindowTitle($foreground)
     }
-    else {
-        $null
-    }
-    Update-OverlayText
+    $snapshot = $script:sessionLookup.GetSnapshot()
+    if ($foreground -eq $script:lastContextWindow -and $caption -eq $script:lastContextCaption -and
+        [object]::ReferenceEquals($snapshot, $script:sessionSnapshot)) { return }
+    $script:lastContextWindow = $foreground
+    $script:lastContextCaption = $caption
+    Update-ContextText
 }
 
 $positionTimer = [System.Windows.Threading.DispatcherTimer]::new()
@@ -429,29 +309,18 @@ $contextTimer = [System.Windows.Threading.DispatcherTimer]::new()
 $contextTimer.Interval = [TimeSpan]::FromSeconds(8)
 $contextTimer.Add_Tick({ Update-ContextText })
 
-$cacheWarmTimer = [System.Windows.Threading.DispatcherTimer]::new()
-$cacheWarmTimer.Interval = [TimeSpan]::FromSeconds(30)
-$cacheWarmTimer.Add_Tick({ Warm-CurrentGroupyContextCache })
-
 $moveSizeHook = [CodexGroupy.UsageOverlayNativeV5]::StartMoveSizeHook()
 if ($moveSizeHook -eq [IntPtr]::Zero) {
     Write-Warning 'Could not install the native move/resize event hook; the usage badge will still work but will follow window drags.'
 }
-$foregroundHook = [CodexGroupy.UsageOverlayNativeV5]::StartForegroundHook()
-if ($foregroundHook -eq [IntPtr]::Zero) {
-    Write-Warning 'Could not install the native foreground event hook; chat-context updates will wait for the normal two-second refresh.'
-}
-
 Update-UsageText
 Update-ContextText
-Warm-CurrentGroupyContextCache
 $window.Show()
 $window.Hide()
 Update-OverlayPlacement
 $positionTimer.Start()
 $usageTimer.Start()
 $contextTimer.Start()
-$cacheWarmTimer.Start()
 Write-Host "Showing Codex weekly and active-chat context usage on the active Groupy / VS Code tab strip. Press Ctrl+C to stop."
 
 $dispatcherFrame = [System.Windows.Threading.DispatcherFrame]::new()
@@ -474,13 +343,9 @@ finally {
     $positionTimer.Stop()
     $usageTimer.Stop()
     $contextTimer.Stop()
-    $cacheWarmTimer.Stop()
     if ($testTimer) { $testTimer.Stop() }
     if ($moveSizeHook -ne [IntPtr]::Zero) {
         [void][CodexGroupy.UsageOverlayNativeV5]::UnhookWinEvent($moveSizeHook)
-    }
-    if ($foregroundHook -ne [IntPtr]::Zero) {
-        [void][CodexGroupy.UsageOverlayNativeV5]::UnhookWinEvent($foregroundHook)
     }
     $window.Close()
 }

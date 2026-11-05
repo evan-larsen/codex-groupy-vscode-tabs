@@ -34,14 +34,14 @@ $logPath = Join-Path $workDir 'CodexGroupySupervisor.log'
 $powerShellExe = (Get-Command powershell.exe -CommandType Application -ErrorAction Stop).Source
 
 $helpers = @(
-    [pscustomobject]@{ Name = 'Codex tab-title sync'; Script = 'CodexGroupyTabSync.ps1'; Arguments = @('-WatchAutoTitle'); ReloadInputs = @('CodexGroupyTabSync.ps1') },
-    [pscustomobject]@{ Name = 'Codex chat rename Ctrl+Shift+R'; Script = 'CodexChatRenameHotkey.ps1'; Arguments = @(); ReloadInputs = @('CodexChatRenameHotkey.ps1', 'CodexVsCodeLiveRenameBridge.js') },
+    [pscustomobject]@{ Name = 'Codex session lookup index'; Script = 'CodexGroupySessionIndex.ps1'; Arguments = @(); ReloadInputs = @('CodexGroupySessionIndex.ps1', 'CodexGroupySessionIndex.js') },
+    [pscustomobject]@{ Name = 'Codex tab-title sync'; Script = 'CodexGroupyTabSync.ps1'; Arguments = @('-WatchAutoTitle'); ReloadInputs = @('CodexGroupyTabSync.ps1', 'CodexGroupyTitleProbe.ps1') },
     [pscustomobject]@{ Name = 'Groupy Ctrl+1 through Ctrl+9'; Script = 'GroupyNumberTabs.ps1'; Arguments = @(); ReloadInputs = @('GroupyNumberTabs.ps1') },
     [pscustomobject]@{ Name = 'Separate-group Ctrl+Shift+N'; Script = 'GroupySeparateWindowHotkey.ps1'; Arguments = @(); ReloadInputs = @('GroupySeparateWindowHotkey.ps1') },
-    [pscustomobject]@{ Name = 'Usage/context overlay'; Script = 'GroupyUsageOverlay.ps1'; Arguments = @(); ReloadInputs = @('GroupyUsageOverlay.ps1') },
+    [pscustomobject]@{ Name = 'Usage/context overlay'; Script = 'GroupyUsageOverlay.ps1'; Arguments = @(); ReloadInputs = @('GroupyUsageOverlay.ps1', 'CodexGroupySessionLookup.ps1') },
     # Dots also launch the Node bridge.  Keep both pieces in step so an update cannot leave
     # a long-lived helper running stale in-memory code and silently drawing no indicators.
-    [pscustomobject]@{ Name = 'Codex activity dots'; Script = 'GroupyCodexActivityDots.ps1'; Arguments = @('-AllGroupsCached'); ReloadInputs = @('GroupyCodexActivityDots.ps1', 'CodexVsCodeLiveRenameBridge.js') }
+    [pscustomobject]@{ Name = 'Codex activity dots'; Script = 'GroupyCodexActivityDots.ps1'; Arguments = @('-AllGroupsCached'); ReloadInputs = @('GroupyCodexActivityDots.ps1', 'CodexVsCodeLiveRenameBridge.js', 'CodexGroupySessionLookup.ps1') }
 )
 
 function Write-SupervisorLog([string]$Message) {
